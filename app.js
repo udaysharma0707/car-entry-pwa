@@ -134,6 +134,31 @@ function collectFormData(){
     addIfMissing: document.getElementById('addIfMissing').checked
   };
 }
+// Convert fields to UPPERCASE except services (which we keep as-is).
+function uppercaseExceptServices(fd) {
+  // guard
+  fd.carRegistrationNo = (fd.carRegistrationNo || "").toString().toUpperCase();
+  fd.carName = (fd.carName || "").toString().toUpperCase();
+
+  // services: leave them exactly as selected (do NOT uppercase)
+  // fd.services is an array; we intentionally do nothing to it
+
+  // numeric fields: keep as-is
+  // qtyTiresWheelCoverSold, amountPaid, kmsTravelled - keep them unchanged
+  // modeOfPayment: it's an array — uppercase its elements (user didn't exclude it)
+  if (Array.isArray(fd.modeOfPayment)) {
+    fd.modeOfPayment = fd.modeOfPayment.map(function(s){ return (s||"").toString().toUpperCase(); });
+  } else {
+    fd.modeOfPayment = (fd.modeOfPayment || "").toString().toUpperCase();
+  }
+
+  // free-text advice and other info -> uppercase
+  fd.adviceToCustomer = (fd.adviceToCustomer || "").toString().toUpperCase();
+  fd.otherInfo = (fd.otherInfo || "").toString().toUpperCase();
+
+  return fd;
+}
+
 
 function showMessage(text){
   const m = document.getElementById('msg'); m.textContent = text; m.style.display='block';
@@ -182,3 +207,4 @@ submitBtn.addEventListener('click', async function(){
     submitBtn.disabled = false; submitBtn.textContent = 'Submit';
   }
 });
+
