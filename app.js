@@ -1,6 +1,6 @@
 // app.js - JSONP-enabled client for Car Entry PWA (for GitHub Pages)
 // Set these to your Apps Script webapp URL and the same secret token in Apps Script
-const ENDPOINT = "https://script.google.com/macros/s/AKfycbzGwyo0kD6k3u6hQswcrCvSMnxPJZAV1Y18Dmtw02ayxy_M1IriLJ-RPnoNVrsd5MwI/exec";
+const ENDPOINT = "https://script.google.com/macros/s/AKfycbzWLcZQPoGYEZyBTx9ditY3kUAExXgYl2WGS8PJPYofoAB4h-UI_Lt1VMWH1glgiiqc1Q/exec";
 const SHARED_TOKEN = "shopSecret2025";
 
 const KEY_QUEUE = "car_entry_queue_v1";
@@ -209,5 +209,6 @@ submitBtn.addEventListener('click', async function(){
     submitBtn.disabled = false; submitBtn.textContent = 'Submit';
   }
 });
+
 
 
