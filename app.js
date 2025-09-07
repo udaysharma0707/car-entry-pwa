@@ -1,39 +1,55 @@
-// app.js - JSONP-enabled client for Car Entry PWA (for GitHub Pages)
-// Set these to your Apps Script webapp URL and the same secret token in Apps Script
-const ENDPOINT = "https://script.google.com/macros/s/AKfycbzWLcZQPoGYEZyBTx9ditY3kUAExXgYl2WGS8PJPYofoAB4h-UI_Lt1VMWH1glgiiqc1Q/exec";
+// debug-app.js - JSONP-enabled client with verbose logging & uppercase (except services)
+// REPLACE these two lines with your values:
+const ENDPOINT = "https://script.google.com/macros/s/AKfycbwYlOWs7Mxh4Y928W3ajfi9Tq0bWa8wpSgo0HxuAHBEXhwUOuaxbrMnpy_RgefGBXLP1A/exec";
 const SHARED_TOKEN = "shopSecret2025";
 
+// --- UI / queue setup ---
 const KEY_QUEUE = "car_entry_queue_v1";
 const submitBtn = document.getElementById('submitBtn');
 const statusSpan = document.getElementById('status');
 
-function updateStatus(){ statusSpan.textContent = navigator.onLine ? 'online' : 'offline'; }
+function updateStatus(){ statusSpan.textContent = navigator.onLine ? 'online' : 'offline'; console.log('[STATUS]', statusSpan.textContent); }
 window.addEventListener('online', ()=>{ updateStatus(); flushQueue(); });
 window.addEventListener('offline', ()=>{ updateStatus(); });
 updateStatus();
 
-function getQueue(){ try { return JSON.parse(localStorage.getItem(KEY_QUEUE) || "[]"); } catch(e){ return []; } }
+function getQueue(){ try { return JSON.parse(localStorage.getItem(KEY_QUEUE) || "[]"); } catch(e){ console.error('queue parse error', e); return []; } }
 function setQueue(q){ localStorage.setItem(KEY_QUEUE, JSON.stringify(q)); }
 
-/**
- * JSONP helper - injects <script src="..."> and expects a callback name.
- * dataObj: object of key->value that will be serialized into query string.
- * cb(err, resp) - callback invoked on success or error.
- */
+// --- Uppercase helper (except services) ---
+function uppercaseExceptServices(fd) {
+  try {
+    fd.carRegistrationNo = (fd.carRegistrationNo || "").toString().toUpperCase();
+    fd.carName = (fd.carName || "").toString().toUpperCase();
+    // services left as-is
+    if (Array.isArray(fd.modeOfPayment)) {
+      fd.modeOfPayment = fd.modeOfPayment.map(s => (s||"").toString().toUpperCase());
+    } else {
+      fd.modeOfPayment = (fd.modeOfPayment || "").toString().toUpperCase();
+    }
+    fd.adviceToCustomer = (fd.adviceToCustomer || "").toString().toUpperCase();
+    fd.otherInfo = (fd.otherInfo || "").toString().toUpperCase();
+  } catch (e) {
+    console.warn('uppercaseExceptServices error', e);
+  }
+  return fd;
+}
+
+// --- JSONP helper with strong logging ---
 function jsonpRequest(dataObj, cb, timeoutMs) {
   timeoutMs = timeoutMs || 15000;
   var callbackName = 'jsonp_cb_' + Date.now() + '_' + Math.floor(Math.random()*100000);
-  // install callback
+  console.log('[JSONP] creating callback', callbackName);
+
   window[callbackName] = function(response) {
-    try { cb(null, response); } finally {
-      // cleanup
+    try { console.log('[JSONP] callback fired', response); cb(null, response); }
+    finally {
       try { delete window[callbackName]; } catch(e){}
       if (script.parentNode) script.parentNode.removeChild(script);
       if (timer) clearTimeout(timer);
     }
   };
 
-  // build query string
   var qsParts = [];
   for (var k in dataObj) {
     if (!dataObj.hasOwnProperty(k)) continue;
@@ -42,14 +58,14 @@ function jsonpRequest(dataObj, cb, timeoutMs) {
     qsParts.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(v)));
   }
   qsParts.push('callback=' + encodeURIComponent(callbackName));
-
   var url = ENDPOINT + '?' + qsParts.join('&');
+  console.log('[JSONP] injecting script src=', url);
 
   var script = document.createElement('script');
   script.src = url;
   script.async = true;
-  script.onerror = function() {
-    // network error loading script
+  script.onerror = function(ev) {
+    console.error('[JSONP] script load error', ev);
     try { delete window[callbackName]; } catch(e){}
     if (script.parentNode) script.parentNode.removeChild(script);
     if (timer) clearTimeout(timer);
@@ -60,17 +76,14 @@ function jsonpRequest(dataObj, cb, timeoutMs) {
   var timer = setTimeout(function(){
     try { delete window[callbackName]; } catch(e){}
     if (script.parentNode) script.parentNode.removeChild(script);
+    console.warn('[JSONP] timeout waiting for callback');
     cb(new Error('Timeout'));
   }, timeoutMs);
 }
 
-/**
- * Replacement for previous fetch-based sendToServer.
- * Returns a Promise that resolves with server response object {success: true, ...}
- */
+// wrapper used by submission
 function sendToServer(formData) {
   return new Promise(function(resolve, reject){
-    // flatten arrays to comma-separated strings for safe URL usage
     var payload = {
       token: SHARED_TOKEN,
       carRegistrationNo: formData.carRegistrationNo || '',
@@ -85,11 +98,16 @@ function sendToServer(formData) {
       addIfMissing: formData.addIfMissing ? '1' : ''
     };
 
-    // Use JSONP
+    // quick URL-length guard (approx)
+    var roughLength = (ENDPOINT + '?' + Object.keys(payload).map(k=>k+'='+payload[k]).join('&')).length;
+    console.log('[JSONP] estimated URL length', roughLength);
+    if (roughLength > 1900) {
+      return reject(new Error('Payload too large for JSONP (try shorter text)'));
+    }
+
     jsonpRequest(payload, function(err, resp){
       if (err) return reject(err);
       if (resp && resp.success) return resolve(resp);
-      // server replied but indicates error
       return reject(new Error((resp && resp.error) ? resp.error : 'Server error'));
     }, 20000);
   });
@@ -97,30 +115,29 @@ function sendToServer(formData) {
 
 function queueSubmission(formData){
   const q = getQueue(); q.push({ ts: Date.now(), data: formData }); setQueue(q);
+  console.log('[QUEUE] queued item, new length=', getQueue().length);
 }
 
 async function flushQueue(){
-  if (!navigator.onLine) return;
+  if (!navigator.onLine) { console.log('[FLUSH] offline - abort'); return; }
   let q = getQueue();
-  if (!q || q.length === 0) return;
+  if (!q || q.length === 0) { console.log('[FLUSH] nothing to flush'); return; }
   submitBtn.disabled = true;
-  // keep trying to send the first item until failure
+  console.log('[FLUSH] start, queue length=', q.length);
   while (q.length > 0) {
     try {
       const resp = await sendToServer(q[0].data);
-      if (resp && resp.success) { q.shift(); setQueue(q); }
+      if (resp && resp.success) { q.shift(); setQueue(q); console.log('[FLUSH] item synced', resp); }
       else break;
     } catch (err) {
-      // stop trying on network/server error
+      console.warn('[FLUSH] stop on error', err);
       break;
     }
   }
   submitBtn.disabled = false;
 }
 
-function collectFormData()
-  formData = uppercaseExceptServices(formData); // convert fields (client-side)
-{
+function collectFormData(){
   const services = Array.from(document.querySelectorAll('.service:checked')).map(i=>i.value);
   const mode = Array.from(document.querySelectorAll('.mode:checked')).map(i=>i.value);
   return {
@@ -136,34 +153,9 @@ function collectFormData()
     addIfMissing: document.getElementById('addIfMissing').checked
   };
 }
-// Convert fields to UPPERCASE except services (which we keep as-is).
-function uppercaseExceptServices(fd) {
-  // guard
-  fd.carRegistrationNo = (fd.carRegistrationNo || "").toString().toUpperCase();
-  fd.carName = (fd.carName || "").toString().toUpperCase();
-
-  // services: leave them exactly as selected (do NOT uppercase)
-  // fd.services is an array; we intentionally do nothing to it
-
-  // numeric fields: keep as-is
-  // qtyTiresWheelCoverSold, amountPaid, kmsTravelled - keep them unchanged
-  // modeOfPayment: it's an array — uppercase its elements (user didn't exclude it)
-  if (Array.isArray(fd.modeOfPayment)) {
-    fd.modeOfPayment = fd.modeOfPayment.map(function(s){ return (s||"").toString().toUpperCase(); });
-  } else {
-    fd.modeOfPayment = (fd.modeOfPayment || "").toString().toUpperCase();
-  }
-
-  // free-text advice and other info -> uppercase
-  fd.adviceToCustomer = (fd.adviceToCustomer || "").toString().toUpperCase();
-  fd.otherInfo = (fd.otherInfo || "").toString().toUpperCase();
-
-  return fd;
-}
-
 
 function showMessage(text){
-  const m = document.getElementById('msg'); m.textContent = text; m.style.display='block';
+  const m = document.getElementById('msg'); m.textContent = text; m.style.display='block'; console.log('[UI]', text);
   setTimeout(()=>{ m.style.display='none'; }, 4000);
 }
 function clearForm(){
@@ -180,35 +172,38 @@ function clearForm(){
 }
 
 submitBtn.addEventListener('click', async function(){
-  const formData = collectFormData();
-  if (!formData.carRegistrationNo) { alert('Please enter Car registration no.'); return; }
-  if (!formData.carName) { alert('Please enter Car name'); return; }
-
-  submitBtn.disabled = true; submitBtn.textContent = 'Saving...';
   try {
+    let formData = collectFormData();
+    // Uppercase (except services)
+    formData = uppercaseExceptServices(formData);
+    console.log('[SUBMIT] formData after uppercaseExceptServices:', formData);
+
+    if (!formData.carRegistrationNo) { alert('Please enter Car registration no.'); return; }
+    if (!formData.carName) { alert('Please enter Car name'); return; }
+
+    submitBtn.disabled = true; submitBtn.textContent = 'Saving...';
+
     if (navigator.onLine) {
-      const res = await sendToServer(formData);
-      if (res && res.success) {
-        showMessage('Saved — Serial: ' + res.serial);
-        clearForm();
-        // attempt flush any queued items too
-        flushQueue();
-      } else {
-        // server rejected — queue locally
+      try {
+        const res = await sendToServer(formData);
+        if (res && res.success) {
+          showMessage('Saved — Serial: ' + res.serial);
+          clearForm();
+          flushQueue();
+        } else {
+          queueSubmission(formData);
+          showMessage('Saved locally (server busy). Will sync later.');
+        }
+      } catch (err) {
+        console.warn('[SUBMIT] sendToServer error', err);
         queueSubmission(formData);
-        showMessage('Saved locally (server busy). Will sync later.');
+        showMessage('Network error — saved locally.');
       }
     } else {
       queueSubmission(formData);
       showMessage('Offline — saved locally and will sync when online.');
     }
-  } catch (err) {
-    queueSubmission(formData);
-    showMessage('Network error — saved locally.');
   } finally {
     submitBtn.disabled = false; submitBtn.textContent = 'Submit';
   }
 });
-
-
-
