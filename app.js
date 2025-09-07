@@ -1,6 +1,6 @@
 // debug-app.js - JSONP-enabled client with verbose logging & uppercase (except services)
 // REPLACE these two lines with your values:
-const ENDPOINT = "https://script.google.com/macros/s/AKfycbyCCWqA53XVSPkRG76dFQmDSvIkAjbDOjIdgS5getb-Xz2-ZFTZTIP7qnKZqQX43VOGCw/exec";
+const ENDPOINT = "https://script.google.com/macros/s/AKfycbwTvytWNDLOP3wKq4Dp80DR8AP3CQao-8jokYtznqXU668hnbHGtXO0OYONbykOVN2-Vw/exec";
 const SHARED_TOKEN = "shopSecret2025";
 
 // --- UI / queue setup ---
@@ -207,4 +207,5 @@ submitBtn.addEventListener('click', async function(){
     submitBtn.disabled = false; submitBtn.textContent = 'Submit';
   }
 });
+
 
