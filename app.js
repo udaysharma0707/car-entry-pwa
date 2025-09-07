@@ -1,6 +1,6 @@
-// app.js - client for Car Entry PWA
-// IMPORTANT: replace with your endpoint and token
-const ENDPOINT = "https://script.google.com/macros/s/AKfycbwodGN93oP31SK_KK4dxL6LssMhSVEZq0VGaf_r-UN-ERTXFwVYnRVtrjPdCzFf7K0TDg/exec"; // e.g. https://script.google.com/macros/s/xxxx/exec
+// app.js - JSONP-enabled client for Car Entry PWA (for GitHub Pages)
+// Set these to your Apps Script webapp URL and the same secret token in Apps Script
+const ENDPOINT = "https://script.google.com/macros/s/AKfycbzGwyo0kD6k3u6hQswcrCvSMnxPJZAV1Y18Dmtw02ayxy_M1IriLJ-RPnoNVrsd5MwI/exec";
 const SHARED_TOKEN = "shopSecret2025";
 
 const KEY_QUEUE = "car_entry_queue_v1";
@@ -15,14 +15,84 @@ updateStatus();
 function getQueue(){ try { return JSON.parse(localStorage.getItem(KEY_QUEUE) || "[]"); } catch(e){ return []; } }
 function setQueue(q){ localStorage.setItem(KEY_QUEUE, JSON.stringify(q)); }
 
-async function sendToServer(formData){
-  const body = { token: SHARED_TOKEN, formData: formData, addIfMissing: !!formData.addIfMissing };
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+/**
+ * JSONP helper - injects <script src="..."> and expects a callback name.
+ * dataObj: object of key->value that will be serialized into query string.
+ * cb(err, resp) - callback invoked on success or error.
+ */
+function jsonpRequest(dataObj, cb, timeoutMs) {
+  timeoutMs = timeoutMs || 15000;
+  var callbackName = 'jsonp_cb_' + Date.now() + '_' + Math.floor(Math.random()*100000);
+  // install callback
+  window[callbackName] = function(response) {
+    try { cb(null, response); } finally {
+      // cleanup
+      try { delete window[callbackName]; } catch(e){}
+      if (script.parentNode) script.parentNode.removeChild(script);
+      if (timer) clearTimeout(timer);
+    }
+  };
+
+  // build query string
+  var qsParts = [];
+  for (var k in dataObj) {
+    if (!dataObj.hasOwnProperty(k)) continue;
+    var v = dataObj[k];
+    if (v === null || v === undefined) v = '';
+    qsParts.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(v)));
+  }
+  qsParts.push('callback=' + encodeURIComponent(callbackName));
+
+  var url = ENDPOINT + '?' + qsParts.join('&');
+
+  var script = document.createElement('script');
+  script.src = url;
+  script.async = true;
+  script.onerror = function() {
+    // network error loading script
+    try { delete window[callbackName]; } catch(e){}
+    if (script.parentNode) script.parentNode.removeChild(script);
+    if (timer) clearTimeout(timer);
+    cb(new Error('Script load error'));
+  };
+  document.head.appendChild(script);
+
+  var timer = setTimeout(function(){
+    try { delete window[callbackName]; } catch(e){}
+    if (script.parentNode) script.parentNode.removeChild(script);
+    cb(new Error('Timeout'));
+  }, timeoutMs);
+}
+
+/**
+ * Replacement for previous fetch-based sendToServer.
+ * Returns a Promise that resolves with server response object {success: true, ...}
+ */
+function sendToServer(formData) {
+  return new Promise(function(resolve, reject){
+    // flatten arrays to comma-separated strings for safe URL usage
+    var payload = {
+      token: SHARED_TOKEN,
+      carRegistrationNo: formData.carRegistrationNo || '',
+      carName: formData.carName || '',
+      services: Array.isArray(formData.services) ? formData.services.join(', ') : (formData.services || ''),
+      qtyTiresWheelCoverSold: formData.qtyTiresWheelCoverSold || '',
+      amountPaid: formData.amountPaid || '',
+      modeOfPayment: Array.isArray(formData.modeOfPayment) ? formData.modeOfPayment.join(', ') : (formData.modeOfPayment || ''),
+      kmsTravelled: formData.kmsTravelled || '',
+      adviceToCustomer: formData.adviceToCustomer || '',
+      otherInfo: formData.otherInfo || '',
+      addIfMissing: formData.addIfMissing ? '1' : ''
+    };
+
+    // Use JSONP
+    jsonpRequest(payload, function(err, resp){
+      if (err) return reject(err);
+      if (resp && resp.success) return resolve(resp);
+      // server replied but indicates error
+      return reject(new Error((resp && resp.error) ? resp.error : 'Server error'));
+    }, 20000);
   });
-  return res.json();
 }
 
 function queueSubmission(formData){
@@ -34,12 +104,16 @@ async function flushQueue(){
   let q = getQueue();
   if (!q || q.length === 0) return;
   submitBtn.disabled = true;
-  for (let i=0; i<q.length; i++){
+  // keep trying to send the first item until failure
+  while (q.length > 0) {
     try {
-      const resp = await sendToServer(q[0].data); // always attempt first item
+      const resp = await sendToServer(q[0].data);
       if (resp && resp.success) { q.shift(); setQueue(q); }
-      else { break; }
-    } catch (err){ break; }
+      else break;
+    } catch (err) {
+      // stop trying on network/server error
+      break;
+    }
   }
   submitBtn.disabled = false;
 }
@@ -108,6 +182,3 @@ submitBtn.addEventListener('click', async function(){
     submitBtn.disabled = false; submitBtn.textContent = 'Submit';
   }
 });
-
-// periodic flush
-setInterval(flushQueue, 30 * 1000);
