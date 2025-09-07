@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Car Entry</title>
-  <link rel="manifest" href="/manifest.json">
+  <link rel="manifest" href="manifest.json">
   <style>
     body{font-family:Arial, sans-serif;max-width:520px;margin:12px auto;padding:10px}
     h1{font-size:20px;margin-bottom:8px}
@@ -64,7 +64,7 @@
   <div id="msg" style="display:none"></div>
   <div class="small">Status: <span id="status">online</span></div>
 
-  <script src="/app.js"></script>
+  <script src="app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').then(()=>console.log('SW registered')).catch(()=>console.log('SW failed'));
@@ -72,3 +72,4 @@
   </script>
 </body>
 </html>
+
