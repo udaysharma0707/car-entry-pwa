@@ -81,22 +81,21 @@ function jsonpRequest(dataObj, cb, timeoutMs) {
   }, timeoutMs);
 }
 
-// wrapper used by submission
-function sendToServer(formData) {
-  return new Promise(function(resolve, reject){
-    var payload = {
-      token: SHARED_TOKEN,
-      carRegistrationNo: formData.carRegistrationNo || '',
-      carName: formData.carName || '',
-      services: Array.isArray(formData.services) ? formData.services.join(', ') : (formData.services || ''),
-      qtyTiresWheelCoverSold: formData.qtyTiresWheelCoverSold || '',
-      amountPaid: formData.amountPaid || '',
-      modeOfPayment: Array.isArray(formData.modeOfPayment) ? formData.modeOfPayment.join(', ') : (formData.modeOfPayment || ''),
-      kmsTravelled: formData.kmsTravelled || '',
-      adviceToCustomer: formData.adviceToCustomer || '',
-      otherInfo: formData.otherInfo || '',
-      addIfMissing: formData.addIfMissing ? '1' : ''
-    };
+async function sendToServer(formData, clientTs) {
+  // include clientTs if provided (epoch millis)
+  const body = { token: SHARED_TOKEN, formData: formData, clientTs: clientTs || null, addIfMissing: !!formData.addIfMissing };
+
+  // We'll still use JSONP GET in your app (existing pattern). If using JSONP,
+  // ensure you include clientTs as a parameter instead of body. If you still use fetch POST,
+  // keep this body usage. Below example works if you changed to POST endpoint accepting JSON.
+  const res = await fetch(ENDPOINT, {
+    method: 'POST', // if your endpoint supports POST; otherwise send clientTs as query param for JSONP
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return res.json();
+}
+
 
     // quick URL-length guard (approx)
     var roughLength = (ENDPOINT + '?' + Object.keys(payload).map(k=>k+'='+payload[k]).join('&')).length;
@@ -119,20 +118,19 @@ function queueSubmission(formData){
 }
 
 async function flushQueue(){
-  if (!navigator.onLine) { console.log('[FLUSH] offline - abort'); return; }
+  if (!navigator.onLine) return;
   let q = getQueue();
-  if (!q || q.length === 0) { console.log('[FLUSH] nothing to flush'); return; }
+  if (!q || q.length === 0) return;
   submitBtn.disabled = true;
-  console.log('[FLUSH] start, queue length=', q.length);
   while (q.length > 0) {
     try {
-      const resp = await sendToServer(q[0].data);
-      if (resp && resp.success) { q.shift(); setQueue(q); console.log('[FLUSH] item synced', resp); }
-      else break;
-    } catch (err) {
-      console.warn('[FLUSH] stop on error', err);
-      break;
-    }
+      const item = q[0];
+      // item = { ts: <epoch>, data: {...} }
+      // For JSONP approach, build the injected script URL with &clientTs=item.ts
+      const resp = await sendToServer(item.data, item.ts);
+      if (resp && resp.success) { q.shift(); setQueue(q); }
+      else { break; }
+    } catch (err){ break; }
   }
   submitBtn.disabled = false;
 }
@@ -207,6 +205,7 @@ submitBtn.addEventListener('click', async function(){
     submitBtn.disabled = false; submitBtn.textContent = 'Submit';
   }
 });
+
 
 
 
