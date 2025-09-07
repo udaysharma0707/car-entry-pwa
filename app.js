@@ -1,9 +1,8 @@
-// debug-app.js - JSONP-enabled client with verbose logging & uppercase (except services)
-// REPLACE these two lines with your values:
-const ENDPOINT = "https://script.google.com/macros/s/AKfycbxzWc1V48rVEPXupAYKeB3V80Z0fkUwKp6aIk9DNuHzzW1q8o8ZsrxKMmSXDdRFYsZTgA/exec";
+// app.js - offline-first JSONP client (queueing + sequential flush + uppercase except services)
+// IMPORTANT: set ENDPOINT to your Apps Script web app URL and SHARED_TOKEN to the secret above
+const ENDPOINT = "https://script.google.com/macros/s/REPLACE_WITH_YOUR_DEPLOYED_WEBAPP_ID/exec";
 const SHARED_TOKEN = "shopSecret2025";
 
-// --- UI / queue setup ---
 const KEY_QUEUE = "car_entry_queue_v1";
 const submitBtn = document.getElementById('submitBtn');
 const statusSpan = document.getElementById('status');
@@ -16,12 +15,12 @@ updateStatus();
 function getQueue(){ try { return JSON.parse(localStorage.getItem(KEY_QUEUE) || "[]"); } catch(e){ console.error('queue parse error', e); return []; } }
 function setQueue(q){ localStorage.setItem(KEY_QUEUE, JSON.stringify(q)); }
 
-// --- Uppercase helper (except services) ---
+// uppercase everything except services array
 function uppercaseExceptServices(fd) {
   try {
     fd.carRegistrationNo = (fd.carRegistrationNo || "").toString().toUpperCase();
     fd.carName = (fd.carName || "").toString().toUpperCase();
-    // services left as-is
+    // services left as-is (array or string)
     if (Array.isArray(fd.modeOfPayment)) {
       fd.modeOfPayment = fd.modeOfPayment.map(s => (s||"").toString().toUpperCase());
     } else {
@@ -35,183 +34,110 @@ function uppercaseExceptServices(fd) {
   return fd;
 }
 
-// --- JSONP helper with strong logging ---
-function jsonpRequest(dataObj, cb, timeoutMs) {
+// JSONP helper that returns a Promise and cleans up callback & script
+function jsonpRequest(url, timeoutMs) {
   timeoutMs = timeoutMs || 15000;
-  var callbackName = 'jsonp_cb_' + Date.now() + '_' + Math.floor(Math.random()*100000);
-  console.log('[JSONP] creating callback', callbackName);
-
-  window[callbackName] = function(response) {
-    try { console.log('[JSONP] callback fired', response); cb(null, response); }
-    finally {
+  return new Promise(function(resolve, reject) {
+    var callbackName = "jsonp_cb_" + Date.now() + "_" + Math.floor(Math.random()*1000000);
+    window[callbackName] = function(data) {
+      try { resolve(data); } finally {
+        try { delete window[callbackName]; } catch(e){}
+        var s = document.getElementById(callbackName);
+        if (s && s.parentNode) s.parentNode.removeChild(s);
+      }
+    };
+    // ensure callback param not present already
+    url = url.replace(/(&|\?)?callback=[^&]*/i, "");
+    var fullUrl = url + (url.indexOf('?') === -1 ? '?' : '&') + 'callback=' + encodeURIComponent(callbackName);
+    var script = document.createElement('script');
+    script.id = callbackName;
+    script.src = fullUrl;
+    script.async = true;
+    script.onerror = function(ev) {
       try { delete window[callbackName]; } catch(e){}
       if (script.parentNode) script.parentNode.removeChild(script);
-      if (timer) clearTimeout(timer);
-    }
-  };
-
-  var qsParts = [];
-  for (var k in dataObj) {
-    if (!dataObj.hasOwnProperty(k)) continue;
-    var v = dataObj[k];
-    if (v === null || v === undefined) v = '';
-    qsParts.push(encodeURIComponent(k) + '=' + encodeURIComponent(String(v)));
-  }
-  qsParts.push('callback=' + encodeURIComponent(callbackName));
-  var url = ENDPOINT + '?' + qsParts.join('&');
-  console.log('[JSONP] injecting script src=', url);
-
-  var script = document.createElement('script');
-  script.src = url;
-  script.async = true;
-  script.onerror = function(ev) {
-    console.error('[JSONP] script load error', ev);
-    try { delete window[callbackName]; } catch(e){}
-    if (script.parentNode) script.parentNode.removeChild(script);
-    if (timer) clearTimeout(timer);
-    cb(new Error('Script load error'));
-  };
-  document.head.appendChild(script);
-
-  var timer = setTimeout(function(){
-    try { delete window[callbackName]; } catch(e){}
-    if (script.parentNode) script.parentNode.removeChild(script);
-    console.warn('[JSONP] timeout waiting for callback');
-    cb(new Error('Timeout'));
-  }, timeoutMs);
-}
-// ----- Replace your existing sendToServer() function with this -----
-// Uses your existing jsonpRequest(dataObj, cb, timeoutMs) helper
-// formData: object, clientTs: optional epoch ms (Number or string)
-function sendToServer(formData, clientTs) {
-  return new Promise(function(resolve, reject) {
-    try {
-      var payload = {
-        token: SHARED_TOKEN,
-        carRegistrationNo: formData.carRegistrationNo || "",
-        carName: formData.carName || "",
-        services: Array.isArray(formData.services) ? formData.services.join(", ") : (formData.services || ""),
-        qtyTiresWheelCoverSold: formData.qtyTiresWheelCoverSold || "",
-        amountPaid: formData.amountPaid || "",
-        modeOfPayment: Array.isArray(formData.modeOfPayment) ? formData.modeOfPayment.join(", ") : (formData.modeOfPayment || ""),
-        kmsTravelled: formData.kmsTravelled || "",
-        adviceToCustomer: formData.adviceToCustomer || "",
-        otherInfo: formData.otherInfo || ""
-      };
-      if (clientTs) payload.clientTs = String(clientTs);
-
-      // estimate URL length and reject if too long for JSONP
-      try {
-        var roughLength = (ENDPOINT + '?' + Object.keys(payload).map(function(k){ return k + '=' + payload[k]; }).join('&')).length;
-        console.log('[JSONP] estimated URL length', roughLength);
-        if (roughLength > 1900) {
-          return reject(new Error('Payload too large for JSONP (try shorter text)'));
-        }
-      } catch(e) {
-        // ignore length check if something goes wrong
-      }
-
-      // Use your existing jsonpRequest helper which takes (dataObj, cb, timeoutMs)
-      jsonpRequest(payload, function(err, resp) {
-        if (err) return reject(err);
-        if (resp && resp.success) return resolve(resp);
-        return reject(new Error((resp && resp.error) ? resp.error : 'Server error'));
-      }, 20000);
-    } catch (e) {
-      return reject(e);
-    }
+      reject(new Error('JSONP script load error'));
+    };
+    var timer = setTimeout(function(){
+      try { delete window[callbackName]; } catch(e){}
+      if (script.parentNode) script.parentNode.removeChild(script);
+      reject(new Error('JSONP timeout'));
+    }, timeoutMs);
+    // wrap resolve to clear timer
+    var origResolve = resolve;
+    resolve = function(data) { clearTimeout(timer); origResolve(data); };
+    document.body.appendChild(script);
   });
 }
 
-// ----- Replace your existing flushQueue() with this sequential version -----
+// Build JSONP URL and send - returns a Promise resolved with server object
+function sendToServerJSONP(formData, clientTs) {
+  var params = [];
+  function add(k,v){ if (v === undefined || v === null) v=""; params.push(encodeURIComponent(k) + "=" + encodeURIComponent(String(v))); }
+  add("token", SHARED_TOKEN);
+  add("carRegistrationNo", formData.carRegistrationNo || "");
+  add("carName", formData.carName || "");
+  if (Array.isArray(formData.services)) add("services", formData.services.join(", "));
+  else add("services", formData.services || "");
+  add("qtyTiresWheelCoverSold", formData.qtyTiresWheelCoverSold || "");
+  add("amountPaid", formData.amountPaid || "");
+  if (Array.isArray(formData.modeOfPayment)) add("modeOfPayment", formData.modeOfPayment.join(", "));
+  else add("modeOfPayment", formData.modeOfPayment || "");
+  add("kmsTravelled", formData.kmsTravelled || "");
+  add("adviceToCustomer", formData.adviceToCustomer || "");
+  add("otherInfo", formData.otherInfo || "");
+  if (clientTs) add("clientTs", String(clientTs));
+
+  var base = ENDPOINT;
+  var url = base + (base.indexOf('?') === -1 ? '?' : '&') + params.join("&");
+  // quick guard: URL length for JSONP should be under ~1900 chars for some browsers/servers
+  if (url.length > 1900) {
+    return Promise.reject(new Error("Payload too large for JSONP; shorten text or use a POST-based endpoint"));
+  }
+  console.log("[JSONP] sending:", url);
+  return jsonpRequest(url, 20000);
+}
+
+function queueSubmission(formData){
+  const q = getQueue(); q.push({ ts: Date.now(), data: formData }); setQueue(q);
+  console.log('[QUEUE] queued item, new length=', getQueue().length);
+}
+
+// flushQueue: sequentially send queued items oldest-first; wait for each to succeed before continuing
 async function flushQueue() {
   if (!navigator.onLine) {
-    console.log('[FLUSH] offline; not flushing');
+    console.log("[FLUSH] offline; abort");
     return;
   }
-  var q = getQueue();
+  let q = getQueue();
   if (!q || q.length === 0) {
-    console.log('[FLUSH] queue empty');
+    console.log("[FLUSH] queue empty");
     return;
   }
   submitBtn.disabled = true;
-  console.log('[FLUSH] starting; length =', q.length);
+  console.log("[FLUSH] starting, length=", q.length);
   while (q.length > 0 && navigator.onLine) {
-    var item = q[0]; // oldest item
+    const item = q[0];
     try {
-      // send with client timestamp so the server uses the original event time
-      var resp = await sendToServer(item.data, item.ts);
-      console.log('[FLUSH] server resp', resp);
+      const resp = await sendToServerJSONP(item.data, item.ts);
+      console.log("[FLUSH] response:", resp);
       if (resp && resp.success) {
-        // remove first item only after a successful server response
         q.shift();
         setQueue(q);
-        // tiny pause to avoid bursts
+        // tiny delay
         await new Promise(r => setTimeout(r, 120));
       } else {
-        console.warn('[FLUSH] server rejected item; stopping flush', resp);
+        console.warn("[FLUSH] server rejected:", resp);
         break;
       }
     } catch (err) {
-      console.warn('[FLUSH] send failed; will retry later', err);
+      console.error("[FLUSH] send error:", err);
       break;
     }
   }
   submitBtn.disabled = false;
-  console.log('[FLUSH] finished; remaining queue length =', getQueue().length);
+  console.log("[FLUSH] finished, remaining=", getQueue().length);
 }
-
-// ----- Replace your existing submit handler with this (waits for flush first) -----
-submitBtn.addEventListener('click', async function(){
-  try {
-    var formData = collectFormData();
-    // Uppercase except services (you already call this elsewhere, but ensure here too)
-    formData = uppercaseExceptServices(formData);
-    console.log('[SUBMIT] formData after uppercaseExceptServices:', formData);
-
-    if (!formData.carRegistrationNo) { alert('Please enter Car registration no.'); return; }
-    if (!formData.carName) { alert('Please enter Car name'); return; }
-
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Saving...';
-
-    if (navigator.onLine) {
-      // First - ensure older queued items are sent before this new one
-      await flushQueue();
-
-      // Send current item with clientTs = now
-      var clientTs = Date.now();
-      try {
-        var res = await sendToServer(formData, clientTs);
-        if (res && res.success) {
-          showMessage('Saved — Serial: ' + (res.serial || '(no serial)'));
-          clearForm();
-          // Try flushing any leftover queued items just in case
-          await flushQueue();
-        } else {
-          // Server rejected; queue locally
-          queueSubmission(formData);
-          showMessage('Saved locally (server busy). Will sync later.');
-        }
-      } catch (err) {
-        // Network/server error during send -> queue and notify
-        console.warn('[SUBMIT] sendToServer error', err);
-        queueSubmission(formData);
-        showMessage('Network error — saved locally.');
-      }
-
-    } else {
-      // Offline -> queue with client timestamp
-      queueSubmission(formData);
-      showMessage('Offline — saved locally and will sync when online.');
-    }
-
-  } finally {
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Submit';
-  }
-});
-
 
 function collectFormData(){
   const services = Array.from(document.querySelectorAll('.service:checked')).map(i=>i.value);
@@ -226,13 +152,14 @@ function collectFormData(){
     kmsTravelled: document.getElementById('kmsTravelled').value,
     adviceToCustomer: document.getElementById('adviceToCustomer').value.trim(),
     otherInfo: document.getElementById('otherInfo').value.trim(),
-    addIfMissing: document.getElementById('addIfMissing').checked
+    addIfMissing: document.getElementById('addIfMissing') ? document.getElementById('addIfMissing').checked : false
   };
 }
 
 function showMessage(text){
-  const m = document.getElementById('msg'); m.textContent = text; m.style.display='block'; console.log('[UI]', text);
-  setTimeout(()=>{ m.style.display='none'; }, 4000);
+  const m = document.getElementById('msg'); if (!m) { console.log('[UI]', text); return; }
+  m.textContent = text; m.style.display='block'; console.log('[UI]', text);
+  setTimeout(()=>{ if (m) m.style.display='none'; }, 4000);
 }
 function clearForm(){
   document.getElementById('carRegistrationNo').value='';
@@ -244,13 +171,13 @@ function clearForm(){
   document.getElementById('kmsTravelled').value='';
   document.getElementById('adviceToCustomer').value='';
   document.getElementById('otherInfo').value='';
-  document.getElementById('addIfMissing').checked=false;
+  if (document.getElementById('addIfMissing')) document.getElementById('addIfMissing').checked=false;
 }
 
+// Submit handler: flush queue first (if online), then send the current item
 submitBtn.addEventListener('click', async function(){
   try {
     let formData = collectFormData();
-    // Uppercase (except services)
     formData = uppercaseExceptServices(formData);
     console.log('[SUBMIT] formData after uppercaseExceptServices:', formData);
 
@@ -261,11 +188,18 @@ submitBtn.addEventListener('click', async function(){
 
     if (navigator.onLine) {
       try {
-        const res = await sendToServer(formData);
+        // 1) ensure queued offline items are flushed first
+        await flushQueue();
+
+        // 2) send current item, include clientTs so server can preserve correct ordering
+        const clientTs = Date.now();
+        const res = await sendToServerJSONP(formData, clientTs);
+
         if (res && res.success) {
           showMessage('Saved — Serial: ' + res.serial);
           clearForm();
-          flushQueue();
+          // tiny flush in case something queued meanwhile
+          await flushQueue();
         } else {
           queueSubmission(formData);
           showMessage('Saved locally (server busy). Will sync later.');
@@ -283,10 +217,3 @@ submitBtn.addEventListener('click', async function(){
     submitBtn.disabled = false; submitBtn.textContent = 'Submit';
   }
 });
-
-
-
-
-
-
-
