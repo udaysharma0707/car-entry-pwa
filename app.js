@@ -80,60 +80,138 @@ function jsonpRequest(dataObj, cb, timeoutMs) {
     cb(new Error('Timeout'));
   }, timeoutMs);
 }
-
-async function sendToServer(formData, clientTs) {
-  // include clientTs if provided (epoch millis)
-  const body = { token: SHARED_TOKEN, formData: formData, clientTs: clientTs || null, addIfMissing: !!formData.addIfMissing };
-
-  // We'll still use JSONP GET in your app (existing pattern). If using JSONP,
-  // ensure you include clientTs as a parameter instead of body. If you still use fetch POST,
-  // keep this body usage. Below example works if you changed to POST endpoint accepting JSON.
-  const res = await fetch(ENDPOINT, {
-    method: 'POST', // if your endpoint supports POST; otherwise send clientTs as query param for JSONP
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  return res.json();
-}
-
-
-    // quick URL-length guard (approx)
-    var roughLength = (ENDPOINT + '?' + Object.keys(payload).map(k=>k+'='+payload[k]).join('&')).length;
-    console.log('[JSONP] estimated URL length', roughLength);
-    if (roughLength > 1900) {
-      return reject(new Error('Payload too large for JSONP (try shorter text)'));
-    }
-
-    jsonpRequest(payload, function(err, resp){
-      if (err) return reject(err);
-      if (resp && resp.success) return resolve(resp);
-      return reject(new Error((resp && resp.error) ? resp.error : 'Server error'));
-    }, 20000);
-  });
-}
-
-function queueSubmission(formData){
-  const q = getQueue(); q.push({ ts: Date.now(), data: formData }); setQueue(q);
-  console.log('[QUEUE] queued item, new length=', getQueue().length);
-}
-
-async function flushQueue(){
-  if (!navigator.onLine) return;
-  let q = getQueue();
-  if (!q || q.length === 0) return;
-  submitBtn.disabled = true;
-  while (q.length > 0) {
+// ----- Replace your existing sendToServer() function with this -----
+// Uses your existing jsonpRequest(dataObj, cb, timeoutMs) helper
+// formData: object, clientTs: optional epoch ms (Number or string)
+function sendToServer(formData, clientTs) {
+  return new Promise(function(resolve, reject) {
     try {
-      const item = q[0];
-      // item = { ts: <epoch>, data: {...} }
-      // For JSONP approach, build the injected script URL with &clientTs=item.ts
-      const resp = await sendToServer(item.data, item.ts);
-      if (resp && resp.success) { q.shift(); setQueue(q); }
-      else { break; }
-    } catch (err){ break; }
+      var payload = {
+        token: SHARED_TOKEN,
+        carRegistrationNo: formData.carRegistrationNo || "",
+        carName: formData.carName || "",
+        services: Array.isArray(formData.services) ? formData.services.join(", ") : (formData.services || ""),
+        qtyTiresWheelCoverSold: formData.qtyTiresWheelCoverSold || "",
+        amountPaid: formData.amountPaid || "",
+        modeOfPayment: Array.isArray(formData.modeOfPayment) ? formData.modeOfPayment.join(", ") : (formData.modeOfPayment || ""),
+        kmsTravelled: formData.kmsTravelled || "",
+        adviceToCustomer: formData.adviceToCustomer || "",
+        otherInfo: formData.otherInfo || ""
+      };
+      if (clientTs) payload.clientTs = String(clientTs);
+
+      // estimate URL length and reject if too long for JSONP
+      try {
+        var roughLength = (ENDPOINT + '?' + Object.keys(payload).map(function(k){ return k + '=' + payload[k]; }).join('&')).length;
+        console.log('[JSONP] estimated URL length', roughLength);
+        if (roughLength > 1900) {
+          return reject(new Error('Payload too large for JSONP (try shorter text)'));
+        }
+      } catch(e) {
+        // ignore length check if something goes wrong
+      }
+
+      // Use your existing jsonpRequest helper which takes (dataObj, cb, timeoutMs)
+      jsonpRequest(payload, function(err, resp) {
+        if (err) return reject(err);
+        if (resp && resp.success) return resolve(resp);
+        return reject(new Error((resp && resp.error) ? resp.error : 'Server error'));
+      }, 20000);
+    } catch (e) {
+      return reject(e);
+    }
+  });
+}
+
+// ----- Replace your existing flushQueue() with this sequential version -----
+async function flushQueue() {
+  if (!navigator.onLine) {
+    console.log('[FLUSH] offline; not flushing');
+    return;
+  }
+  var q = getQueue();
+  if (!q || q.length === 0) {
+    console.log('[FLUSH] queue empty');
+    return;
+  }
+  submitBtn.disabled = true;
+  console.log('[FLUSH] starting; length =', q.length);
+  while (q.length > 0 && navigator.onLine) {
+    var item = q[0]; // oldest item
+    try {
+      // send with client timestamp so the server uses the original event time
+      var resp = await sendToServer(item.data, item.ts);
+      console.log('[FLUSH] server resp', resp);
+      if (resp && resp.success) {
+        // remove first item only after a successful server response
+        q.shift();
+        setQueue(q);
+        // tiny pause to avoid bursts
+        await new Promise(r => setTimeout(r, 120));
+      } else {
+        console.warn('[FLUSH] server rejected item; stopping flush', resp);
+        break;
+      }
+    } catch (err) {
+      console.warn('[FLUSH] send failed; will retry later', err);
+      break;
+    }
   }
   submitBtn.disabled = false;
+  console.log('[FLUSH] finished; remaining queue length =', getQueue().length);
 }
+
+// ----- Replace your existing submit handler with this (waits for flush first) -----
+submitBtn.addEventListener('click', async function(){
+  try {
+    var formData = collectFormData();
+    // Uppercase except services (you already call this elsewhere, but ensure here too)
+    formData = uppercaseExceptServices(formData);
+    console.log('[SUBMIT] formData after uppercaseExceptServices:', formData);
+
+    if (!formData.carRegistrationNo) { alert('Please enter Car registration no.'); return; }
+    if (!formData.carName) { alert('Please enter Car name'); return; }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
+
+    if (navigator.onLine) {
+      // First - ensure older queued items are sent before this new one
+      await flushQueue();
+
+      // Send current item with clientTs = now
+      var clientTs = Date.now();
+      try {
+        var res = await sendToServer(formData, clientTs);
+        if (res && res.success) {
+          showMessage('Saved — Serial: ' + (res.serial || '(no serial)'));
+          clearForm();
+          // Try flushing any leftover queued items just in case
+          await flushQueue();
+        } else {
+          // Server rejected; queue locally
+          queueSubmission(formData);
+          showMessage('Saved locally (server busy). Will sync later.');
+        }
+      } catch (err) {
+        // Network/server error during send -> queue and notify
+        console.warn('[SUBMIT] sendToServer error', err);
+        queueSubmission(formData);
+        showMessage('Network error — saved locally.');
+      }
+
+    } else {
+      // Offline -> queue with client timestamp
+      queueSubmission(formData);
+      showMessage('Offline — saved locally and will sync when online.');
+    }
+
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Submit';
+  }
+});
+
 
 function collectFormData(){
   const services = Array.from(document.querySelectorAll('.service:checked')).map(i=>i.value);
@@ -205,6 +283,7 @@ submitBtn.addEventListener('click', async function(){
     submitBtn.disabled = false; submitBtn.textContent = 'Submit';
   }
 });
+
 
 
 
