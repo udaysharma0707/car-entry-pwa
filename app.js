@@ -118,7 +118,9 @@ async function flushQueue(){
   submitBtn.disabled = false;
 }
 
-function collectFormData(){
+function collectFormData()
+  formData = uppercaseExceptServices(formData); // convert fields (client-side)
+{
   const services = Array.from(document.querySelectorAll('.service:checked')).map(i=>i.value);
   const mode = Array.from(document.querySelectorAll('.mode:checked')).map(i=>i.value);
   return {
@@ -207,4 +209,5 @@ submitBtn.addEventListener('click', async function(){
     submitBtn.disabled = false; submitBtn.textContent = 'Submit';
   }
 });
+
 
