@@ -65,11 +65,14 @@
   <div class="small">Status: <span id="status">online</span></div>
 
   <script src="app.js"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').then(()=>console.log('SW registered')).catch(()=>console.log('SW failed'));
-    }
-  </script>
+ <script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js')
+      .then(() => console.log('SW registered'))
+      .catch((err) => console.log('SW failed', err));
+  }
+</script>
 </body>
 </html>
+
 
