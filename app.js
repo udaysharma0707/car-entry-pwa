@@ -1,6 +1,6 @@
 // app.js - offline-first JSONP client (queueing + sequential flush + uppercase except services)
 // IMPORTANT: set ENDPOINT to your Apps Script web app URL and SHARED_TOKEN to the secret above
-const ENDPOINT = "https://script.google.com/macros/s/AKfycbxe_fSyPajKDnXMrhhXJM9MDykym3kLCiehDbFkKYimF_p1zKSOssGD0ibb78zAKNdurw/exec";
+const ENDPOINT = "https://script.google.com/macros/s/AKfycbxIyQFIaRmV87y2w8pSeAdNZ_Nv7yPGKKBEU-YZ5_ONQaAfouxP1ABNE1sIeRTVijaa8w/exec";
 const SHARED_TOKEN = "shopSecret2025";
 
 const KEY_QUEUE = "car_entry_queue_v1";
@@ -217,6 +217,7 @@ submitBtn.addEventListener('click', async function(){
     submitBtn.disabled = false; submitBtn.textContent = 'Submit';
   }
 });
+
 
 
 
