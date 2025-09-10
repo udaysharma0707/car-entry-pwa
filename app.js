@@ -5,6 +5,7 @@ const SHARED_TOKEN = "shopSecret2025";
 
 const KEY_QUEUE = "car_entry_queue_v1";
 const submitBtn = document.getElementById('submitBtn');
+const clearBtn = document.getElementById('clearBtn');
 const statusSpan = document.getElementById('status');
 
 function updateStatus(){ statusSpan.textContent = navigator.onLine ? 'online' : 'offline'; console.log('[STATUS]', statusSpan.textContent); }
@@ -174,6 +175,14 @@ function clearForm(){
   if (document.getElementById('addIfMissing')) document.getElementById('addIfMissing').checked=false;
 }
 
+// Wire Clear button (if present)
+if (clearBtn) {
+  clearBtn.addEventListener('click', function(){
+    clearForm();
+    showMessage('Form cleared');
+  });
+}
+
 // Submit handler: flush queue first (if online), then send the current item
 submitBtn.addEventListener('click', async function(){
   try {
@@ -201,42 +210,25 @@ submitBtn.addEventListener('click', async function(){
           // tiny flush in case something queued meanwhile
           await flushQueue();
         } else {
+          // server returned but didn't accept -> queue locally AND clear UI
           queueSubmission(formData);
+          clearForm(); // <-- clear immediately so user doesn't have to backspace
           showMessage('Saved locally (server busy). Will sync later.');
         }
       } catch (err) {
         console.warn('[SUBMIT] sendToServer error', err);
+        // network error -> queue locally AND clear UI
         queueSubmission(formData);
+        clearForm(); // <-- clear immediately
         showMessage('Network error — saved locally.');
       }
     } else {
+      // offline -> queue locally AND clear UI
       queueSubmission(formData);
+      clearForm(); // <-- clear immediately
       showMessage('Offline — saved locally and will sync when online.');
     }
   } finally {
     submitBtn.disabled = false; submitBtn.textContent = 'Submit';
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
