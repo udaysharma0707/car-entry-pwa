@@ -157,8 +157,9 @@ if (clearBtn) {
   });
 }
 
-// New submit behavior: immediate UI feedback + background sending/queueing
-submitBtn.addEventListener('click', function() {
+// Replace your existing submitBtn.addEventListener('click', ...) with this handler:
+
+submitBtn.addEventListener('click', async function() {
   try {
     // client validation: required fields
     var carReg = document.getElementById('carRegistrationNo').value.trim();
@@ -175,52 +176,59 @@ submitBtn.addEventListener('click', function() {
     var formData = collectFormData();
     formData = uppercaseExceptServices(formData);
 
-    // Immediate UX: inform user, clear form
+    // immediate UI feedback
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
+    // give browser a short tick to repaint UI (fixes devices that batch style updates)
+    await new Promise(r => setTimeout(r, 10));
+
+    // show quick message and clear form immediately (keeps UX snappy)
     showMessage('Submitted — registering...');
     clearForm();
 
-    // briefly disable submit to avoid accidental very-quick duplicates, but keep button label unchanged
-    submitBtn.disabled = true;
-    setTimeout(()=>{ try { submitBtn.disabled = false; } catch(e){} }, 800);
+    // Background send logic (wait for it so we can restore button state correctly)
+    if (navigator.onLine) {
+      try {
+        // flush queued items first
+        await flushQueue();
 
-    // Fire-and-forget send plus background flush
-    (async function sendAndHandle() {
-      if (navigator.onLine) {
-        try {
-          // send current item with clientTs (helps server ordering)
-          const clientTs = Date.now();
-          const resp = await sendToServerJSONP(formData, clientTs).catch(e=>{ throw e; });
+        // send current item with clientTs
+        const clientTs = Date.now();
+        const resp = await sendToServerJSONP(formData, clientTs);
 
-          if (resp && resp.success) {
-            showMessage("Saved — Serial: " + resp.serial);
-          } else if (resp && resp.error) {
-            // server-side validation error: show to user (do NOT queue)
-            alert("Server rejected: " + resp.error);
-            showMessage("Submission rejected by server.");
-          } else {
-            // unknown server condition -> queue locally
-            queueSubmission(formData);
-            showMessage("Saved locally (server busy). Will sync later.");
-          }
-        } catch (err) {
-          // network/JSONP error -> queue locally
-          console.warn("Background send error:", err);
+        if (resp && resp.success) {
+          showMessage("Saved — Serial: " + resp.serial);
+        } else if (resp && resp.error) {
+          alert("Server rejected: " + resp.error);
+          showMessage("Submission rejected by server.");
+        } else {
+          // unknown server condition -> queue
           queueSubmission(formData);
-          showMessage("Network error — saved locally.");
+          showMessage("Saved locally (server busy). Will sync later.");
         }
 
-        // attempt to flush older queued items in background (don't await long)
-        flushQueue().catch(e=>{ console.warn("Background flush error:", e); });
-      } else {
-        // offline: queue locally
+        // attempt an extra flush (best effort)
+        try { await flushQueue(); } catch(e) { /* ignore */ }
+      } catch (err) {
+        // network or JSONP error -> queue locally
+        console.warn("Background send error:", err);
         queueSubmission(formData);
-        showMessage("Offline — saved locally and will sync when online.");
+        showMessage("Network error — saved locally.");
       }
-    })();
+    } else {
+      // offline -> queue locally
+      queueSubmission(formData);
+      showMessage("Offline — saved locally and will sync when online.");
+    }
 
   } catch (ex) {
     console.error("submit handler error:", ex);
     showMessage("Unexpected error. Try again.");
+  } finally {
+    // restore button state
+    submitBtn.textContent = 'Submit';
     submitBtn.disabled = false;
   }
 });
+
+
