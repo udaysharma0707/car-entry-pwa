@@ -1,6 +1,5 @@
-// app.js - offline-first JSONP client (queueing + sequential flush + uppercase except services)
-// IMPORTANT: set ENDPOINT to your Apps Script web app URL and SHARED_TOKEN to the secret above
-const ENDPOINT = "https://script.google.com/macros/s/AKfycbzFTYH2Gt5HqdISXlmCRKMrZu1_rJog_KFAphsyqhdcsKt7o7CReZ6v61EVemFWc4V2pA/exec";
+// app.js - client with strong validation + JSONP queueing only on network errors
+const ENDPOINT = "https://script.google.com/macros/s/AKfycbxmSdEC3-rNn2Jh601kaUckXEXQkXGXUR2jcpOTR4_D9v_F0axkY54Ga9QQ2hR25wD2RQ/exec"; // <-- replace with your web app URL
 const SHARED_TOKEN = "shopSecret2025";
 
 const KEY_QUEUE = "car_entry_queue_v1";
@@ -8,93 +7,61 @@ const submitBtn = document.getElementById('submitBtn');
 const clearBtn = document.getElementById('clearBtn');
 const statusSpan = document.getElementById('status');
 
-function updateStatus(){ statusSpan.textContent = navigator.onLine ? 'online' : 'offline'; console.log('[STATUS]', statusSpan.textContent); }
+function updateStatus(){ statusSpan.textContent = navigator.onLine ? 'online' : 'offline'; }
 window.addEventListener('online', ()=>{ updateStatus(); flushQueue(); });
 window.addEventListener('offline', ()=>{ updateStatus(); });
 updateStatus();
 
-function getQueue(){ try { return JSON.parse(localStorage.getItem(KEY_QUEUE) || "[]"); } catch(e){ console.error('queue parse error', e); return []; } }
+function getQueue(){ try { return JSON.parse(localStorage.getItem(KEY_QUEUE) || "[]"); } catch(e){ return []; } }
 function setQueue(q){ localStorage.setItem(KEY_QUEUE, JSON.stringify(q)); }
 
-// uppercase everything except services array
+// uppercase helper (except services)
 function uppercaseExceptServices(fd) {
   try {
     fd.carRegistrationNo = (fd.carRegistrationNo || "").toString().toUpperCase();
     fd.carName = (fd.carName || "").toString().toUpperCase();
-    // services left as-is (array or string)
-    if (Array.isArray(fd.modeOfPayment)) {
-      fd.modeOfPayment = fd.modeOfPayment.map(s => (s||"").toString().toUpperCase());
-    } else {
-      fd.modeOfPayment = (fd.modeOfPayment || "").toString().toUpperCase();
-    }
+    // services left as-is (array)
+    if (Array.isArray(fd.modeOfPayment)) fd.modeOfPayment = fd.modeOfPayment.map(s => (s||"").toString().toUpperCase());
+    else fd.modeOfPayment = (fd.modeOfPayment || "").toString().toUpperCase();
     fd.adviceToCustomer = (fd.adviceToCustomer || "").toString().toUpperCase();
     fd.otherInfo = (fd.otherInfo || "").toString().toUpperCase();
-  } catch (e) {
-    console.warn('uppercaseExceptServices error', e);
-  }
+  } catch(e){}
   return fd;
 }
 
-// Client-side formatting to mirror server logic:
-function formatCarNoClient(raw) {
-  if (!raw) return raw;
-  var s = raw.toString().toUpperCase().trim();
-  var clean = s.replace(/[^A-Z0-9]/g, '');
-  if (clean.length < 4) return s;
-
-  var last4Match = clean.match(/(\d{4})$/);
-  if (!last4Match) return s;
-  var last4 = last4Match[1];
-  var rest = clean.slice(0, clean.length - 4);
-  var prefixMatch = rest.match(/^([A-Z]{1,2})(.*)$/);
-  if (prefixMatch) {
-    var prefix = prefixMatch[1];
-    var middle = prefixMatch[2] || "";
-    if (middle === "") {
-      return prefix + " " + last4;
-    } else {
-      return prefix + " " + middle + " " + last4;
-    }
-  }
-  return s;
-}
-
-
-// JSONP helper that returns a Promise and cleans up callback & script
+// JSONP helper
 function jsonpRequest(url, timeoutMs) {
   timeoutMs = timeoutMs || 15000;
   return new Promise(function(resolve, reject) {
-    var callbackName = "jsonp_cb_" + Date.now() + "_" + Math.floor(Math.random()*1000000);
-    window[callbackName] = function(data) {
+    var cbName = "jsonp_cb_" + Date.now() + "_" + Math.floor(Math.random()*100000);
+    window[cbName] = function(data) {
       try { resolve(data); } finally {
-        try { delete window[callbackName]; } catch(e){}
-        var s = document.getElementById(callbackName);
+        try { delete window[cbName]; } catch(e){}
+        var s = document.getElementById(cbName);
         if (s && s.parentNode) s.parentNode.removeChild(s);
       }
     };
     url = url.replace(/(&|\?)?callback=[^&]*/i, "");
-    var fullUrl = url + (url.indexOf('?') === -1 ? '?' : '&') + 'callback=' + encodeURIComponent(callbackName);
+    var full = url + (url.indexOf('?') === -1 ? '?' : '&') + 'callback=' + encodeURIComponent(cbName);
     var script = document.createElement('script');
-    script.id = callbackName;
-    script.src = fullUrl;
+    script.id = cbName;
+    script.src = full;
     script.async = true;
-    script.onerror = function(ev) {
-      try { delete window[callbackName]; } catch(e){}
+    script.onerror = function() {
+      try { delete window[cbName]; } catch(e){}
       if (script.parentNode) script.parentNode.removeChild(script);
       reject(new Error('JSONP script load error'));
     };
     var timer = setTimeout(function(){
-      try { delete window[callbackName]; } catch(e){}
+      try { delete window[cbName]; } catch(e){}
       if (script.parentNode) script.parentNode.removeChild(script);
       reject(new Error('JSONP timeout'));
     }, timeoutMs);
-    var origResolve = resolve;
-    resolve = function(data) { clearTimeout(timer); origResolve(data); };
     document.body.appendChild(script);
   });
 }
 
-// Build JSONP URL and send - returns a Promise resolved with server object
+// Build JSONP URL and call
 function sendToServerJSONP(formData, clientTs) {
   var params = [];
   function add(k,v){ if (v === undefined || v === null) v=""; params.push(encodeURIComponent(k) + "=" + encodeURIComponent(String(v))); }
@@ -114,56 +81,41 @@ function sendToServerJSONP(formData, clientTs) {
 
   var base = ENDPOINT;
   var url = base + (base.indexOf('?') === -1 ? '?' : '&') + params.join("&");
-  if (url.length > 1900) {
-    return Promise.reject(new Error("Payload too large for JSONP; shorten text or use a POST-based endpoint"));
-  }
-  console.log("[JSONP] sending:", url);
+  if (url.length > 1900) return Promise.reject(new Error("Payload too large for JSONP"));
   return jsonpRequest(url, 20000);
 }
 
 function queueSubmission(formData){
-  const q = getQueue(); q.push({ ts: Date.now(), data: formData }); setQueue(q);
-  console.log('[QUEUE] queued item, new length=', getQueue().length);
+  var q = getQueue(); q.push({ ts: Date.now(), data: formData }); setQueue(q);
 }
 
-// flushQueue: sequentially send queued items oldest-first; wait for each to succeed before continuing
 async function flushQueue() {
-  if (!navigator.onLine) {
-    console.log("[FLUSH] offline; abort");
-    return;
-  }
-  let q = getQueue();
-  if (!q || q.length === 0) {
-    console.log("[FLUSH] queue empty");
-    return;
-  }
+  if (!navigator.onLine) return;
+  var q = getQueue();
+  if (!q || q.length === 0) return;
   submitBtn.disabled = true;
-  console.log("[FLUSH] starting, length=", q.length);
   while (q.length > 0 && navigator.onLine) {
-    const item = q[0];
+    var item = q[0];
     try {
-      const resp = await sendToServerJSONP(item.data, item.ts);
-      console.log("[FLUSH] response:", resp);
-      if (resp && resp.success) {
-        q.shift();
-        setQueue(q);
-        await new Promise(r => setTimeout(r, 120));
-      } else {
-        console.warn("[FLUSH] server rejected:", resp);
+      var resp = await sendToServerJSONP(item.data, item.ts);
+      if (resp && resp.success) { q.shift(); setQueue(q); await new Promise(r=>setTimeout(r,120)); }
+      else {
+        // If server returns error (validation), do NOT queue further - show and stop
+        if (resp && resp.error) { alert("Server error: " + resp.error); break; }
+        // else unknown server failure -> break (we'll try later)
         break;
       }
     } catch (err) {
-      console.error("[FLUSH] send error:", err);
+      console.error("flush error:", err);
       break;
     }
   }
   submitBtn.disabled = false;
-  console.log("[FLUSH] finished, remaining=", getQueue().length);
 }
 
 function collectFormData(){
-  const services = Array.from(document.querySelectorAll('.service:checked')).map(i=>i.value);
-  const mode = Array.from(document.querySelectorAll('.mode:checked')).map(i=>i.value);
+  var services = Array.from(document.querySelectorAll('.service:checked')).map(i=>i.value);
+  var mode = Array.from(document.querySelectorAll('.mode:checked')).map(i=>i.value);
   return {
     carRegistrationNo: document.getElementById('carRegistrationNo').value.trim(),
     carName: document.getElementById('carName').value.trim(),
@@ -179,9 +131,9 @@ function collectFormData(){
 }
 
 function showMessage(text){
-  const m = document.getElementById('msg'); if (!m) { console.log('[UI]', text); return; }
-  m.textContent = text; m.style.display='block'; console.log('[UI]', text);
-  setTimeout(()=>{ if (m) m.style.display='none'; }, 4000);
+  var m = document.getElementById('msg'); if (!m) { alert(text); return; }
+  m.textContent = text; m.style.display='block';
+  setTimeout(()=>{ m.style.display='none'; }, 4000);
 }
 function clearForm(){
   document.getElementById('carRegistrationNo').value='';
@@ -196,69 +148,70 @@ function clearForm(){
   if (document.getElementById('addIfMissing')) document.getElementById('addIfMissing').checked=false;
 }
 
-// Wire Clear button (if present)
+// Named submit function used by the click handler
+async function submitForm() {
+  // client validation: required fields
+  var amount = document.getElementById('amountPaid').value.trim();
+  var modeChecked = document.querySelectorAll('.mode:checked');
+  if (amount === "") { alert("Amount paid by customer is required."); return; }
+  if (!modeChecked || modeChecked.length === 0) { alert("Please select at least one mode of payment."); return; }
+
+  // collect and uppercase except services
+  var formData = collectFormData();
+  formData = uppercaseExceptServices(formData);
+
+  submitBtn.disabled = true; submitBtn.textContent = 'Saving...';
+
+  if (navigator.onLine) {
+    try {
+      // flush queued first
+      await flushQueue();
+
+      // send current item with clientTs (helps server keep order)
+      var clientTs = Date.now();
+      var resp = await sendToServerJSONP(formData, clientTs);
+
+      if (resp && resp.success) {
+        showMessage("Saved — Serial: " + resp.serial);
+        clearForm();
+        await flushQueue(); // attempt to flush anything left
+      } else if (resp && resp.error) {
+        // server-side validation error: show to user and DO NOT queue
+        alert("Server rejected: " + resp.error);
+      } else {
+        // unknown server condition: queue locally (but avoid queuing on validation errors above)
+        queueSubmission(formData);
+        clearForm();
+        showMessage("Saved locally (server busy). Will sync later.");
+      }
+    } catch (err) {
+      // network error -> queue locally
+      console.warn("Network / JSONP error:", err);
+      queueSubmission(formData);
+      clearForm();
+      showMessage("Network error — saved locally.");
+    }
+  } else {
+    // offline -> queue locally
+    queueSubmission(formData);
+    clearForm();
+    showMessage("Offline — saved locally and will sync when online.");
+  }
+
+  submitBtn.disabled = false; submitBtn.textContent = 'Submit';
+}
+
+// hook up the UI
+if (submitBtn) {
+  submitBtn.addEventListener('click', function(e){
+    e.preventDefault();
+    submitForm();
+  });
+}
 if (clearBtn) {
-  clearBtn.addEventListener('click', function(){
+  clearBtn.addEventListener('click', function(e){
+    e.preventDefault();
     clearForm();
     showMessage('Form cleared');
   });
 }
-
-// Submit handler: flush queue first (if online), then send the current item
-submitBtn.addEventListener('click', async function(){
-  try {
-    let formData = collectFormData();
-
-    // Make uppercase except services & format car registration for display and submission
-    formData = uppercaseExceptServices(formData);
-    // format car registration on client so shopkeeper immediately sees normalized value
-    if (formData.carRegistrationNo && formData.carRegistrationNo.trim() !== "") {
-      formData.carRegistrationNo = formatCarNoClient(formData.carRegistrationNo);
-      // reflect formatted value back to the input so user sees it
-      var el = document.getElementById('carRegistrationNo');
-      if (el) el.value = formData.carRegistrationNo;
-    }
-
-    console.log('[SUBMIT] formData after uppercaseExceptServices & formatCarNoClient:', formData);
-
-    if (!formData.carRegistrationNo) { alert('Please enter Car registration no.'); return; }
-    if (!formData.carName) { alert('Please enter Car name'); return; }
-
-    submitBtn.disabled = true; submitBtn.textContent = 'Saving...';
-
-    if (navigator.onLine) {
-      try {
-        // 1) ensure queued offline items are flushed first
-        await flushQueue();
-
-        // 2) send current item, include clientTs so server can preserve correct ordering
-        const clientTs = Date.now();
-        const res = await sendToServerJSONP(formData, clientTs);
-
-        if (res && res.success) {
-          showMessage('Saved — Serial: ' + res.serial);
-          clearForm();
-          await flushQueue();
-        } else {
-          queueSubmission(formData);
-          clearForm();
-          showMessage('Saved locally (server busy). Will sync later.');
-        }
-      } catch (err) {
-        console.warn('[SUBMIT] sendToServer error', err);
-        queueSubmission(formData);
-        clearForm();
-        showMessage('Network error — saved locally.');
-      }
-    } else {
-      queueSubmission(formData);
-      clearForm();
-      showMessage('Offline — saved locally and will sync when online.');
-    }
-  } finally {
-    submitBtn.disabled = false; submitBtn.textContent = 'Submit';
-  }
-});
-
-
-
