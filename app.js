@@ -1,6 +1,6 @@
 // app.js - offline-first JSONP client (queueing + sequential flush + uppercase except services)
 // IMPORTANT: set ENDPOINT to your Apps Script web app URL and SHARED_TOKEN to the secret above
-const ENDPOINT = "https://script.google.com/macros/s/AKfycbxa6CQ3rJRPTKW5gQ48UBTAeLEw-7vqfCgcIzTVfzpLkluhe3L7d42rDNjrWykV9G-OOg/exec";
+const ENDPOINT = "https://script.google.com/macros/s/AKfycbyYblEQe51OTnkkt5CTb3iwq3RMTHDTta3dEE594O3_2dlqyawopEZSbrj7d_xZcKq-EQ/exec";
 const SHARED_TOKEN = "shopSecret2025";
 
 const KEY_QUEUE = "car_entry_queue_v1";
@@ -35,19 +35,30 @@ function uppercaseExceptServices(fd) {
   return fd;
 }
 
-// Client-side formatCarNo - same logic as server helper
+// Client-side formatting to mirror server logic:
 function formatCarNoClient(raw) {
   if (!raw) return raw;
   var s = raw.toString().toUpperCase().trim();
   var clean = s.replace(/[^A-Z0-9]/g, '');
-  var re = /^([A-Z]{1,2})(\d{1,2})([A-Z]{1,4})(\d{4})$/;
-  var m = clean.match(re);
-  if (m) return m[1] + " " + m[2] + m[3] + " " + m[4];
-  var re2 = /^([A-Z]{1,2})([A-Z0-9]+?)(\d{4})$/;
-  m = clean.match(re2);
-  if (m) return m[1] + " " + m[2] + " " + m[3];
-  return s; // fallback: uppercased original
+  if (clean.length < 4) return s;
+
+  var last4Match = clean.match(/(\d{4})$/);
+  if (!last4Match) return s;
+  var last4 = last4Match[1];
+  var rest = clean.slice(0, clean.length - 4);
+  var prefixMatch = rest.match(/^([A-Z]{1,2})(.*)$/);
+  if (prefixMatch) {
+    var prefix = prefixMatch[1];
+    var middle = prefixMatch[2] || "";
+    if (middle === "") {
+      return prefix + " " + last4;
+    } else {
+      return prefix + " " + middle + " " + last4;
+    }
+  }
+  return s;
 }
+
 
 // JSONP helper that returns a Promise and cleans up callback & script
 function jsonpRequest(url, timeoutMs) {
@@ -248,3 +259,4 @@ submitBtn.addEventListener('click', async function(){
     submitBtn.disabled = false; submitBtn.textContent = 'Submit';
   }
 });
+
