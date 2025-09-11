@@ -6,6 +6,20 @@
   <title>Car Entry</title>
   <link rel="manifest" href="manifest.json">
   <style>
+    /* FORCE: make checkbox list vertical: one per line */
+.checkbox-row { display:block; margin-top:6px; padding:0; }
+.checkbox-row .cb {
+  display:block !important;
+  width:100% !important;
+  padding:6px 0 !important;
+  margin:0 !important;
+  box-sizing:border-box !important;
+}
+.checkbox-row .cb input[type="checkbox"] {
+  margin-right:10px;
+  vertical-align:middle;
+  width:auto;
+}
     body{font-family:Arial, sans-serif;max-width:520px;margin:12px auto;padding:10px}
     h1{font-size:20px;margin-bottom:8px}
     .q-label{display:block;margin-top:10px;font-weight:600}
@@ -111,3 +125,4 @@
   </script>
 </body>
 </html>
+
