@@ -151,25 +151,28 @@
       });
     });
 
-    // Form validation before submit
-    document.getElementById('submitBtn').addEventListener('click', () => {
-      const amountPaid = document.getElementById('amountPaid').value.trim();
-      const paymentModes = document.querySelectorAll('.mode:checked');
+   document.getElementById('submitBtn').addEventListener('click', (e) => {
+  e.preventDefault(); // stop default button behaviour
 
-      if (!amountPaid) {
-        alert("Amount paid by customer is required.");
-        return;
-      }
-      if (paymentModes.length === 0) {
-        alert("Please select at least one mode of payment.");
-        return;
-      }
+  const amountPaid = document.getElementById('amountPaid').value.trim();
+  const paymentModes = document.querySelectorAll('.mode:checked');
 
-      // If passes, call app.js submit logic
-      if (typeof submitForm === "function") {
-        submitForm();
-      }
-    });
+  if (!amountPaid) {
+    alert("Amount paid by customer is required.");
+    return; // ❌ stop here
+  }
+  if (paymentModes.length === 0) {
+    alert("Please select at least one mode of payment.");
+    return; // ❌ stop here
+  }
+
+  // ✅ Only reach here if validations passed
+  if (typeof submitForm === "function") {
+    submitForm();
+  }
+});
+
   </script>
 </body>
 </html>
+
