@@ -6,38 +6,45 @@
   <title>Car Entry</title>
   <link rel="manifest" href="manifest.json">
   <style>
-    /* FORCE: make checkbox list vertical: one per line */
-.checkbox-row { display:block; margin-top:6px; padding:0; }
-.checkbox-row .cb {
-  display:block !important;
-  width:100% !important;
-  padding:6px 0 !important;
-  margin:0 !important;
-  box-sizing:border-box !important;
-}
-.checkbox-row .cb input[type="checkbox"] {
-  margin-right:10px;
-  vertical-align:middle;
-  width:auto;
-}
-    body{font-family:Arial, sans-serif;max-width:520px;margin:12px auto;padding:10px}
-    {
-  background-image: url('background.jpg');
-  background-size: cover;
-  background-position: center center;
-  background-repeat: no-repeat;
-}
+    /* page background (uses background.jpg located next to index.html) */
+    html,body { height:100%; margin:0; padding:0; }
+    body {
+      background-image: url('./background.jpg');
+      background-size: cover;
+      background-position: center center;
+      background-repeat: no-repeat;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+      font-family: Arial, sans-serif;
+      display:flex;
+      align-items:flex-start;
+      justify-content:center;
+      padding:20px;
+      box-sizing:border-box;
+    }
 
-    h1{font-size:20px;margin-bottom:8px}
+    /* center container so text is readable on top of background */
+    .container {
+      width:100%;
+      max-width:520px;
+      background: rgba(255,255,255,0.92); /* nearly opaque white for readability */
+      border-radius:10px;
+      padding:14px;
+      box-sizing:border-box;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+    }
+
+    h1{font-size:20px;margin:0 0 10px 0}
     .q-label{display:block;margin-top:10px;font-weight:600}
 
     /* only text/number inputs and textarea are full width */
     input[type="text"], input[type="number"], select, textarea {
       width:100%; padding:8px; font-size:15px; margin-top:6px; box-sizing:border-box;
+      border:1px solid #ccc; border-radius:4px;
     }
 
     /* FORCE: make checkbox list vertical: one per line
-       Use !important to prevent other styles (including cached CSS) from overriding. */
+       Use display:block and full width to ensure mobile devices also show one-per-line */
     .checkbox-row { display:block; margin-top:6px; padding:0; }
     .checkbox-row .cb {
       display:block !important;
@@ -45,6 +52,7 @@
       padding:6px 0 !important;
       margin:0 !important;
       box-sizing:border-box !important;
+      font-weight:normal;
     }
     .checkbox-row .cb input[type="checkbox"] {
       margin-right:10px;
@@ -52,10 +60,27 @@
       width:auto;
     }
 
-    button{margin-top:12px;padding:10px 14px;font-size:16px}
+    button{
+      margin-top:12px;
+      padding:10px 14px;
+      font-size:16px;
+      border-radius:6px;
+      border: none;
+      background:#2c7be5;
+      color:white;
+      cursor:pointer;
+    }
+    button#clearBtn { background:#6c757d; }
+
     #msg{margin-top:10px;color:green;font-weight:600}
     .small{font-size:13px;color:#666;margin-top:6px}
-    .form-actions {display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap}
+    .form-actions {
+      display:flex;
+      gap:8px;
+      align-items:center;
+      margin-top:12px;
+      flex-wrap:wrap;
+    }
     @media (max-width:420px){
       .form-actions {flex-direction:column; align-items:stretch}
       .form-actions button {width:100%}
@@ -63,53 +88,57 @@
   </style>
 </head>
 <body>
-  <h1>Car Entry</h1>
+  <div class="container">
+    <h1>Car Entry</h1>
 
-  <label class="q-label">1. Car registration no.</label>
-  <input id="carRegistrationNo" type="text" placeholder="e.g. MH12AB1234">
+    <label class="q-label">1. Car registration no.</label>
+    <input id="carRegistrationNo" type="text" placeholder="e.g. MH12AB1234">
 
-  <label class="q-label">2. Car name</label>
-  <input id="carName" type="text" placeholder="e.g. Swift">
+    <label class="q-label">2. Car name</label>
+    <input id="carName" type="text" placeholder="e.g. Swift">
 
-  <label class="q-label">3. Services provided (check all that apply)</label>
-  <div class="checkbox-row">
-    <label class="cb"><input type="checkbox" value="Wheel Alignment" class="service"> Wheel Alignment</label>
-    <label class="cb"><input type="checkbox" value="Wheel Balancing" class="service"> Wheel Balancing</label>
-    <label class="cb"><input type="checkbox" value="Tires sold" class="service"> Tires sold</label>
-    <label class="cb"><input type="checkbox" value="Wheel Cover sold" class="service"> Wheel Cover sold</label>
-    <label class="cb"><input type="checkbox" value="Other" class="service"> Other</label>
+    <label class="q-label">3. Services provided (check all that apply)</label>
+    <div class="checkbox-row">
+      <label class="cb"><input type="checkbox" value="Wheel Alignment" class="service"> Wheel Alignment</label>
+      <label class="cb"><input type="checkbox" value="Wheel Balancing" class="service"> Wheel Balancing</label>
+      <label class="cb"><input type="checkbox" value="Tires sold" class="service"> Tires sold</label>
+      <label class="cb"><input type="checkbox" value="Wheel Cover sold" class="service"> Wheel Cover sold</label>
+      <label class="cb"><input type="checkbox" value="Other" class="service"> Other</label>
+    </div>
+
+    <label class="q-label">4. How many Tires/Wheel Cover sold?</label>
+    <input id="qtyTiresWheelCoverSold" type="number" min="0" step="1" placeholder="Enter quantity if sold">
+
+    <label class="q-label">5. Amount paid by customer (₹)</label>
+    <input id="amountPaid" type="number" min="0" step="0.01">
+
+    <label class="q-label">6. Mode of Payment (check all that apply)</label>
+    <div class="checkbox-row">
+      <label class="cb"><input type="checkbox" value="Cash" class="mode"> Cash</label>
+      <label class="cb"><input type="checkbox" value="Online Payment J &amp; K Bank" class="mode"> Online Payment J &amp; K Bank</label>
+      <label class="cb"><input type="checkbox" value="Other" class="mode"> Other</label>
+    </div>
+
+    <label class="q-label">7. How many Kms vehicle has travelled?</label>
+    <input id="kmsTravelled" type="number" min="0" step="1">
+
+    <label class="q-label">8. Advice to customer</label>
+    <textarea id="adviceToCustomer" rows="2"></textarea>
+
+    <label class="q-label">9. Any Other Information</label>
+    <textarea id="otherInfo" rows="2"></textarea>
+
+    <label style="margin-top:8px"><input id="addIfMissing" type="checkbox"> Add car name to list if missing</label>
+
+    <div class="form-actions">
+      <button id="submitBtn" type="button">Submit</button>
+      <button id="clearBtn" type="button">Clear</button>
+      <div style="margin-left:auto;font-weight:600;"><span id="status">online</span></div>
+    </div>
+
+    <div id="msg" style="display:none"></div>
+    <div class="small" style="margin-top:6px">Status: <span id="status-duplicate" style="display:none"></span></div>
   </div>
-
-  <label class="q-label">4. How many Tires/Wheel Cover sold?</label>
-  <input id="qtyTiresWheelCoverSold" type="number" min="0" step="1" placeholder="Enter quantity if sold">
-
-  <label class="q-label">5. Amount paid by customer (₹)</label>
-  <input id="amountPaid" type="number" min="0" step="0.01">
-
-  <label class="q-label">6. Mode of Payment (check all that apply)</label>
-  <div class="checkbox-row">
-    <label class="cb"><input type="checkbox" value="Cash" class="mode"> Cash</label>
-    <label class="cb"><input type="checkbox" value="Online Payment J &amp; K Bank" class="mode"> Online Payment J &amp; K Bank</label>
-    <label class="cb"><input type="checkbox" value="Other" class="mode"> Other</label>
-  </div>
-
-  <label class="q-label">7. How many Kms vehicle has travelled?</label>
-  <input id="kmsTravelled" type="number" min="0" step="1">
-
-  <label class="q-label">8. Advice to customer</label>
-  <textarea id="adviceToCustomer" rows="2"></textarea>
-
-  <label class="q-label">9. Any Other Information</label>
-  <textarea id="otherInfo" rows="2"></textarea>
-
-  <div class="form-actions">
-    <button id="submitBtn" type="button">Submit</button>
-    <button id="clearBtn" type="button">Clear</button>
-    <div style="margin-left:auto;font-weight:600;"><span id="status">online</span></div>
-  </div>
-
-  <div id="msg" style="display:none"></div>
-  <div class="small">Status: <span id="status-duplicate" style="display:none"></span></div>
 
   <script src="app.js"></script>
   <script>
@@ -130,10 +159,3 @@
   </script>
 </body>
 </html>
-
-
-
-
-
-
-
