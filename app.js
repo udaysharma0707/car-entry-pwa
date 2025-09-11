@@ -157,9 +157,8 @@ if (clearBtn) {
   });
 }
 
-// Replace your existing submitBtn.addEventListener('click', ...) with this handler:
-
-submitBtn.addEventListener('click', async function() {
+// REPLACE your existing submitBtn.addEventListener('click', ...) with this:
+submitBtn.addEventListener('click', function () {
   try {
     // client validation: required fields
     var carReg = document.getElementById('carRegistrationNo').value.trim();
@@ -172,63 +171,77 @@ submitBtn.addEventListener('click', async function() {
     if (amount === "") { alert("Amount paid by customer is required."); return; }
     if (!modeChecked || modeChecked.length === 0) { alert("Please select at least one mode of payment."); return; }
 
-    // collect and uppercase except services
+    // collect + uppercase (except services)
     var formData = collectFormData();
     formData = uppercaseExceptServices(formData);
 
-    // immediate UI feedback
+    // immediate UI feedback: brief "Saving..." then restore quickly so mobile won't stick
     submitBtn.disabled = true;
     submitBtn.textContent = 'Saving...';
-    // give browser a short tick to repaint UI (fixes devices that batch style updates)
-    await new Promise(r => setTimeout(r, 10));
+    // allow the browser a tick to repaint
+    setTimeout(function(){
+      // restore button quickly so it doesn't stay stuck
+      submitBtn.textContent = 'Submit';
+      submitBtn.disabled = false;
+    }, 700); // 700ms is enough for visible feedback but short enough not to annoy
 
-    // show quick message and clear form immediately (keeps UX snappy)
+    // Clear UI immediately so user doesn't have to backspace
     showMessage('Submitted — registering...');
     clearForm();
 
-    // Background send logic (wait for it so we can restore button state correctly)
-    if (navigator.onLine) {
+    // Run network work in background (fire-and-forget). It will still queue on failures.
+    (async function backgroundSend() {
       try {
-        // flush queued items first
-        await flushQueue();
+        if (navigator.onLine) {
+          // flush any earlier queued items first
+          try { await flushQueue(); } catch (e) { console.warn('flushQueue failed', e); }
 
-        // send current item with clientTs
-        const clientTs = Date.now();
-        const resp = await sendToServerJSONP(formData, clientTs);
+          // send current item (include clientTs to preserve order)
+          try {
+            const clientTs = Date.now();
+            const resp = await sendToServerJSONP(formData, clientTs);
+            if (resp && resp.success) {
+              showMessage('Saved — Serial: ' + resp.serial);
+            } else if (resp && resp.error) {
+              // server validation or rejection (do not queue)
+              showMessage('Server rejected: ' + resp.error);
+              console.warn('Server rejected submission:', resp.error);
+            } else {
+              // unknown server issue -> queue locally
+              queueSubmission(formData);
+              showMessage('Saved locally (server busy). Will sync later.');
+            }
+          } catch (errSend) {
+            // network/JSONP error -> queue locally
+            console.warn('sendToServerJSONP failed, queuing locally', errSend);
+            queueSubmission(formData);
+            showMessage('Network error — saved locally.');
+          }
 
-        if (resp && resp.success) {
-          showMessage("Saved — Serial: " + resp.serial);
-        } else if (resp && resp.error) {
-          alert("Server rejected: " + resp.error);
-          showMessage("Submission rejected by server.");
+          // attempt another flush (best-effort)
+          try { await flushQueue(); } catch (e) { /* ignore */ }
         } else {
-          // unknown server condition -> queue
+          // offline -> queue locally
           queueSubmission(formData);
-          showMessage("Saved locally (server busy). Will sync later.");
+          showMessage('Offline — saved locally and will sync when online.');
         }
-
-        // attempt an extra flush (best effort)
-        try { await flushQueue(); } catch(e) { /* ignore */ }
       } catch (err) {
-        // network or JSONP error -> queue locally
-        console.warn("Background send error:", err);
-        queueSubmission(formData);
-        showMessage("Network error — saved locally.");
+        console.error('backgroundSend unexpected error', err);
+        // ensure it's queued so nothing is lost
+        try { queueSubmission(formData); } catch(e){}
+        showMessage('Error occurred — saved locally.');
       }
-    } else {
-      // offline -> queue locally
-      queueSubmission(formData);
-      showMessage("Offline — saved locally and will sync when online.");
-    }
+    })();
 
   } catch (ex) {
-    console.error("submit handler error:", ex);
-    showMessage("Unexpected error. Try again.");
-  } finally {
-    // restore button state
-    submitBtn.textContent = 'Submit';
+    console.error('submit handler exception', ex);
+    showMessage('Unexpected error. Try again.');
     submitBtn.disabled = false;
+    submitBtn.textContent = 'Submit';
   }
 });
+
+});
+
 
 
