@@ -6,12 +6,15 @@
   <title>Car Entry</title>
   <link rel="manifest" href="manifest.json">
   <style>
+    /* page background (uses background.jpg located next to index.html) */
     html,body { height:100%; margin:0; padding:0; }
     body {
       background-image: url('./background.jpg');
       background-size: cover;
       background-position: center center;
       background-repeat: no-repeat;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
       font-family: Arial, sans-serif;
       display:flex;
       align-items:flex-start;
@@ -20,10 +23,11 @@
       box-sizing:border-box;
     }
 
+    /* center container so text is readable on top of background */
     .container {
       width:100%;
       max-width:520px;
-      background: rgba(255,255,255,0.92);
+      background: rgba(255,255,255,0.92); /* nearly opaque white for readability */
       border-radius:10px;
       padding:14px;
       box-sizing:border-box;
@@ -33,25 +37,34 @@
     h1{font-size:20px;margin:0 0 10px 0}
     .q-label{display:block;margin-top:10px;font-weight:600}
 
+    /* only text/number inputs and textarea are full width */
     input[type="text"], input[type="number"], select, textarea {
       width:100%; padding:8px; font-size:15px; margin-top:6px; box-sizing:border-box;
       border:1px solid #ccc; border-radius:4px;
     }
 
+    /* FORCE: make checkbox list vertical: one per line
+       Use display:block and full width to ensure mobile devices also show one-per-line */
     .checkbox-row { display:block; margin-top:6px; padding:0; }
     .checkbox-row .cb {
       display:block !important;
       width:100% !important;
       padding:6px 0 !important;
-      margin:0 0 6px 0 !important;
+      margin:0 !important;
       box-sizing:border-box !important;
       font-weight:normal;
     }
     .checkbox-row .cb input[type="checkbox"] {
-      transform: scale(1.5);
-      margin-right: 12px;
-      accent-color: #2c7be5;
+      margin-right:10px;
+      vertical-align:middle;
+      width:auto;
     }
+    /* make checkboxes bigger */
+.checkbox-row .cb input[type="checkbox"] {
+  transform: scale(1.5);   /* increase size */
+  margin-right: 12px;      /* extra spacing from label */
+  accent-color: #2c7be5;   /* modern browsers: color the box */
+}
 
     button{
       margin-top:12px;
@@ -78,9 +91,6 @@
       .form-actions {flex-direction:column; align-items:stretch}
       .form-actions button {width:100%}
     }
-
-    /* Hide Q4 by default */
-    #qtyWrapper { display:none; }
   </style>
 </head>
 <body>
@@ -94,7 +104,7 @@
     <input id="carName" type="text" placeholder="e.g. Swift">
 
     <label class="q-label">3. Services provided (check all that apply)</label>
-    <div class="checkbox-row" id="services">
+    <div class="checkbox-row">
       <label class="cb"><input type="checkbox" value="Wheel Alignment" class="service"> Wheel Alignment</label>
       <label class="cb"><input type="checkbox" value="Wheel Balancing" class="service"> Wheel Balancing</label>
       <label class="cb"><input type="checkbox" value="Tires sold" class="service"> Tires sold</label>
@@ -102,16 +112,14 @@
       <label class="cb"><input type="checkbox" value="Other" class="service"> Other</label>
     </div>
 
-    <div id="qtyWrapper">
-      <label class="q-label">4. How many Tires/Wheel Cover sold?</label>
-      <input id="qtyTiresWheelCoverSold" type="number" min="0" step="1" placeholder="Enter quantity if sold">
-    </div>
+    <label class="q-label">4. How many Tires/Wheel Cover sold?</label>
+    <input id="qtyTiresWheelCoverSold" type="number" min="0" step="1" placeholder="Enter quantity if sold">
 
-    <label class="q-label">5. Amount paid by customer (₹) <span style="color:red">*</span></label>
-    <input id="amountPaid" type="number" min="0" step="0.01" required>
+    <label class="q-label">5. Amount paid by customer (₹)</label>
+    <input id="amountPaid" type="number" min="0" step="0.01">
 
-    <label class="q-label">6. Mode of Payment (check all that apply) <span style="color:red">*</span></label>
-    <div class="checkbox-row" id="modes">
+    <label class="q-label">6. Mode of Payment (check all that apply)</label>
+    <div class="checkbox-row">
       <label class="cb"><input type="checkbox" value="Cash" class="mode"> Cash</label>
       <label class="cb"><input type="checkbox" value="Online Payment J &amp; K Bank" class="mode"> Online Payment J &amp; K Bank</label>
       <label class="cb"><input type="checkbox" value="Other" class="mode"> Other</label>
@@ -138,41 +146,22 @@
 
   <script src="app.js"></script>
   <script>
-    // Show/Hide Q4 based on services selected
-    const serviceCheckboxes = document.querySelectorAll('.service');
-    const qtyWrapper = document.getElementById('qtyWrapper');
-
-    serviceCheckboxes.forEach(cb => {
-      cb.addEventListener('change', () => {
-        const showQty = Array.from(serviceCheckboxes).some(el =>
-          el.checked && (el.value === "Tires sold" || el.value === "Wheel Cover sold")
-        );
-        qtyWrapper.style.display = showQty ? 'block' : 'none';
+    // runtime enforcement: if older CSS still active due to cache/SW, force block display on load
+    (function(){
+      document.querySelectorAll('.checkbox-row .cb').forEach(function(el){
+        el.style.display = 'block';
+        el.style.width = '100%';
+        el.style.marginBottom = '6px';
       });
-    });
+    })();
 
-   document.getElementById('submitBtn').addEventListener('click', (e) => {
-  e.preventDefault(); // stop default button behaviour
-
-  const amountPaid = document.getElementById('amountPaid').value.trim();
-  const paymentModes = document.querySelectorAll('.mode:checked');
-
-  if (!amountPaid) {
-    alert("Amount paid by customer is required.");
-    return; // ❌ stop here
-  }
-  if (paymentModes.length === 0) {
-    alert("Please select at least one mode of payment.");
-    return; // ❌ stop here
-  }
-
-  // ✅ Only reach here if validations passed
-  if (typeof submitForm === "function") {
-    submitForm();
-  }
-});
-
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js')
+        .then(() => console.log('SW registered'))
+        .catch((err) => console.log('SW failed', err));
+    }
   </script>
 </body>
 </html>
+
 
