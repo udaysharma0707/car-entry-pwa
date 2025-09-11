@@ -8,26 +8,38 @@
   <style>
     body{font-family:Arial, sans-serif;max-width:520px;margin:12px auto;padding:10px}
     h1{font-size:20px;margin-bottom:8px}
-    label{display:block;margin-top:10px;font-weight:600}
-    input, select, textarea {width:100%; padding:8px; font-size:15px; margin-top:6px; box-sizing:border-box}
-    .checkbox-row {display:flex; flex-wrap:wrap; gap:8px; margin-top:6px}
-    .cb {display:flex; align-items:center; gap:6px}
+    /* question labels (stacked) */
+    .q-label{display:block;margin-top:10px;font-weight:600}
+    /* only text/number inputs and textarea are full width */
+    input[type="text"], input[type="number"], select, textarea {width:100%; padding:8px; font-size:15px; margin-top:6px; box-sizing:border-box}
+    /* checkbox container: inline flex that wraps */
+    .checkbox-row {display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; align-items:center}
+    /* each checkbox label is inline-flex so checkbox and text sit side-by-side */
+    .cb {display:inline-flex; align-items:center; gap:6px; padding:4px 6px; border-radius:4px}
+    /* small visual tweak: make checkbox input itself auto size (not full width) */
+    .cb input[type="checkbox"] {width:auto; margin:0}
+    /* action buttons */
     button{margin-top:12px;padding:10px 14px;font-size:16px}
     #msg{margin-top:10px;color:green;font-weight:600}
     .small{font-size:13px;color:#666;margin-top:6px}
-    .form-actions {display:flex; gap:8px; align-items:center; margin-top:12px}
+    .form-actions {display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap}
+    /* Responsive tweaks */
+    @media (max-width:420px){
+      .form-actions {flex-direction:column; align-items:stretch}
+      .form-actions button {width:100%}
+    }
   </style>
 </head>
 <body>
   <h1>Car Entry</h1>
 
-  <label>1. Car registration no.</label>
+  <label class="q-label">1. Car registration no.</label>
   <input id="carRegistrationNo" type="text" placeholder="e.g. MH12AB1234">
 
-  <label>2. Car name</label>
+  <label class="q-label">2. Car name</label>
   <input id="carName" type="text" placeholder="e.g. Swift">
 
-  <label>3. Services provided (check all that apply)</label>
+  <label class="q-label">3. Services provided (check all that apply)</label>
   <div class="checkbox-row">
     <label class="cb"><input type="checkbox" value="Wheel Alignment" class="service"> Wheel Alignment</label>
     <label class="cb"><input type="checkbox" value="Wheel Balancing" class="service"> Wheel Balancing</label>
@@ -36,26 +48,26 @@
     <label class="cb"><input type="checkbox" value="Other" class="service"> Other</label>
   </div>
 
-  <label>4. How many Tires/Wheel Cover sold?</label>
+  <label class="q-label">4. How many Tires/Wheel Cover sold?</label>
   <input id="qtyTiresWheelCoverSold" type="number" min="0" step="1" placeholder="Enter quantity if sold">
 
-  <label>5. Amount paid by customer (₹)</label>
+  <label class="q-label">5. Amount paid by customer (₹)</label>
   <input id="amountPaid" type="number" min="0" step="0.01">
 
-  <label>6. Mode of Payment (check all that apply)</label>
+  <label class="q-label">6. Mode of Payment (check all that apply)</label>
   <div class="checkbox-row">
     <label class="cb"><input type="checkbox" value="Cash" class="mode"> Cash</label>
-    <label class="cb"><input type="checkbox" value="Online Payment J & K Bank" class="mode"> Online Payment J & K Bank</label>
+    <label class="cb"><input type="checkbox" value="Online Payment J &amp; K Bank" class="mode"> Online Payment J &amp; K Bank</label>
     <label class="cb"><input type="checkbox" value="Other" class="mode"> Other</label>
   </div>
 
-  <label>7. How many Kms vehicle has travelled?</label>
+  <label class="q-label">7. How many Kms vehicle has travelled?</label>
   <input id="kmsTravelled" type="number" min="0" step="1">
 
-  <label>8. Advice to customer</label>
+  <label class="q-label">8. Advice to customer</label>
   <textarea id="adviceToCustomer" rows="2"></textarea>
 
-  <label>9. Any Other Information</label>
+  <label class="q-label">9. Any Other Information</label>
   <textarea id="otherInfo" rows="2"></textarea>
 
   <label style="margin-top:8px"><input id="addIfMissing" type="checkbox"> Add car name to list if missing</label>
@@ -63,11 +75,11 @@
   <div class="form-actions">
     <button id="submitBtn" type="button">Submit</button>
     <button id="clearBtn" type="button">Clear</button>
-    <span id="status" style="margin-left:12px;font-weight:600;"></span>
+    <div style="margin-left:auto;font-weight:600;"><span id="status">online</span></div>
   </div>
 
   <div id="msg" style="display:none"></div>
-  <div class="small">Status: <span id="status">online</span></div>
+  <div class="small">Status: <span id="status-duplicate" style="display:none"></span></div>
 
   <script src="app.js"></script>
   <script>
