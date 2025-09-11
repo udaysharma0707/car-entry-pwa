@@ -1,6 +1,6 @@
 // app.js - offline-first JSONP client (queueing + sequential flush + uppercase except services)
 // IMPORTANT: set ENDPOINT to your Apps Script web app URL and SHARED_TOKEN to the secret above
-const ENDPOINT = "https://script.google.com/macros/s/AKfycbynyu3z4GBCXCej2_DlWQvCooA5qoWA5iX6dhkNQf6-hGcWBy9IZ2IMoW6MBPXKBoCZaQ/exec";
+const ENDPOINT = "https://script.google.com/macros/s/AKfycbxa6CQ3rJRPTKW5gQ48UBTAeLEw-7vqfCgcIzTVfzpLkluhe3L7d42rDNjrWykV9G-OOg/exec";
 const SHARED_TOKEN = "shopSecret2025";
 
 const KEY_QUEUE = "car_entry_queue_v1";
@@ -35,6 +35,20 @@ function uppercaseExceptServices(fd) {
   return fd;
 }
 
+// Client-side formatCarNo - same logic as server helper
+function formatCarNoClient(raw) {
+  if (!raw) return raw;
+  var s = raw.toString().toUpperCase().trim();
+  var clean = s.replace(/[^A-Z0-9]/g, '');
+  var re = /^([A-Z]{1,2})(\d{1,2})([A-Z]{1,4})(\d{4})$/;
+  var m = clean.match(re);
+  if (m) return m[1] + " " + m[2] + m[3] + " " + m[4];
+  var re2 = /^([A-Z]{1,2})([A-Z0-9]+?)(\d{4})$/;
+  m = clean.match(re2);
+  if (m) return m[1] + " " + m[2] + " " + m[3];
+  return s; // fallback: uppercased original
+}
+
 // JSONP helper that returns a Promise and cleans up callback & script
 function jsonpRequest(url, timeoutMs) {
   timeoutMs = timeoutMs || 15000;
@@ -47,7 +61,6 @@ function jsonpRequest(url, timeoutMs) {
         if (s && s.parentNode) s.parentNode.removeChild(s);
       }
     };
-    // ensure callback param not present already
     url = url.replace(/(&|\?)?callback=[^&]*/i, "");
     var fullUrl = url + (url.indexOf('?') === -1 ? '?' : '&') + 'callback=' + encodeURIComponent(callbackName);
     var script = document.createElement('script');
@@ -64,7 +77,6 @@ function jsonpRequest(url, timeoutMs) {
       if (script.parentNode) script.parentNode.removeChild(script);
       reject(new Error('JSONP timeout'));
     }, timeoutMs);
-    // wrap resolve to clear timer
     var origResolve = resolve;
     resolve = function(data) { clearTimeout(timer); origResolve(data); };
     document.body.appendChild(script);
@@ -91,7 +103,6 @@ function sendToServerJSONP(formData, clientTs) {
 
   var base = ENDPOINT;
   var url = base + (base.indexOf('?') === -1 ? '?' : '&') + params.join("&");
-  // quick guard: URL length for JSONP should be under ~1900 chars for some browsers/servers
   if (url.length > 1900) {
     return Promise.reject(new Error("Payload too large for JSONP; shorten text or use a POST-based endpoint"));
   }
@@ -125,7 +136,6 @@ async function flushQueue() {
       if (resp && resp.success) {
         q.shift();
         setQueue(q);
-        // tiny delay
         await new Promise(r => setTimeout(r, 120));
       } else {
         console.warn("[FLUSH] server rejected:", resp);
@@ -187,8 +197,18 @@ if (clearBtn) {
 submitBtn.addEventListener('click', async function(){
   try {
     let formData = collectFormData();
+
+    // Make uppercase except services & format car registration for display and submission
     formData = uppercaseExceptServices(formData);
-    console.log('[SUBMIT] formData after uppercaseExceptServices:', formData);
+    // format car registration on client so shopkeeper immediately sees normalized value
+    if (formData.carRegistrationNo && formData.carRegistrationNo.trim() !== "") {
+      formData.carRegistrationNo = formatCarNoClient(formData.carRegistrationNo);
+      // reflect formatted value back to the input so user sees it
+      var el = document.getElementById('carRegistrationNo');
+      if (el) el.value = formData.carRegistrationNo;
+    }
+
+    console.log('[SUBMIT] formData after uppercaseExceptServices & formatCarNoClient:', formData);
 
     if (!formData.carRegistrationNo) { alert('Please enter Car registration no.'); return; }
     if (!formData.carName) { alert('Please enter Car name'); return; }
@@ -207,25 +227,21 @@ submitBtn.addEventListener('click', async function(){
         if (res && res.success) {
           showMessage('Saved — Serial: ' + res.serial);
           clearForm();
-          // tiny flush in case something queued meanwhile
           await flushQueue();
         } else {
-          // server returned but didn't accept -> queue locally AND clear UI
           queueSubmission(formData);
-          clearForm(); // <-- clear immediately so user doesn't have to backspace
+          clearForm();
           showMessage('Saved locally (server busy). Will sync later.');
         }
       } catch (err) {
         console.warn('[SUBMIT] sendToServer error', err);
-        // network error -> queue locally AND clear UI
         queueSubmission(formData);
-        clearForm(); // <-- clear immediately
+        clearForm();
         showMessage('Network error — saved locally.');
       }
     } else {
-      // offline -> queue locally AND clear UI
       queueSubmission(formData);
-      clearForm(); // <-- clear immediately
+      clearForm();
       showMessage('Offline — saved locally and will sync when online.');
     }
   } finally {
