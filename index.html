@@ -8,22 +8,33 @@
   <style>
     body{font-family:Arial, sans-serif;max-width:520px;margin:12px auto;padding:10px}
     h1{font-size:20px;margin-bottom:8px}
-    /* question labels (stacked) */
     .q-label{display:block;margin-top:10px;font-weight:600}
+
     /* only text/number inputs and textarea are full width */
-    input[type="text"], input[type="number"], select, textarea {width:100%; padding:8px; font-size:15px; margin-top:6px; box-sizing:border-box}
-    /* checkbox container: inline flex that wraps */
-    .checkbox-row {display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; align-items:center}
-    /* each checkbox label is inline-flex so checkbox and text sit side-by-side */
-    .cb {display:inline-flex; align-items:center; gap:6px; padding:4px 6px; border-radius:4px}
-    /* small visual tweak: make checkbox input itself auto size (not full width) */
-    .cb input[type="checkbox"] {width:auto; margin:0}
-    /* action buttons */
+    input[type="text"], input[type="number"], select, textarea {
+      width:100%; padding:8px; font-size:15px; margin-top:6px; box-sizing:border-box;
+    }
+
+    /* FORCE: make checkbox list vertical: one per line
+       Use !important to prevent other styles (including cached CSS) from overriding. */
+    .checkbox-row { display:block; margin-top:6px; padding:0; }
+    .checkbox-row .cb {
+      display:block !important;
+      width:100% !important;
+      padding:6px 0 !important;
+      margin:0 !important;
+      box-sizing:border-box !important;
+    }
+    .checkbox-row .cb input[type="checkbox"] {
+      margin-right:10px;
+      vertical-align:middle;
+      width:auto;
+    }
+
     button{margin-top:12px;padding:10px 14px;font-size:16px}
     #msg{margin-top:10px;color:green;font-weight:600}
     .small{font-size:13px;color:#666;margin-top:6px}
     .form-actions {display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap}
-    /* Responsive tweaks */
     @media (max-width:420px){
       .form-actions {flex-direction:column; align-items:stretch}
       .form-actions button {width:100%}
@@ -83,6 +94,15 @@
 
   <script src="app.js"></script>
   <script>
+    // runtime enforcement: if older CSS still active due to cache/SW, force block display on load
+    (function(){
+      document.querySelectorAll('.checkbox-row .cb').forEach(function(el){
+        el.style.display = 'block';
+        el.style.width = '100%';
+        el.style.marginBottom = '6px';
+      });
+    })();
+
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js')
         .then(() => console.log('SW registered'))
