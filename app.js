@@ -1,5 +1,5 @@
 // app.js - client with strong validation + JSONP queueing only on network errors
-const ENDPOINT = "https://script.google.com/macros/s/AKfycbxmSdEC3-rNn2Jh601kaUckXEXQkXGXUR2jcpOTR4_D9v_F0axkY54Ga9QQ2hR25wD2RQ/exec"; // <-- replace with your web app URL
+const ENDPOINT = "https://script.google.com/macros/s/AKfycbw9CPa7Z-sYUhHWhbDC7rW8uAZi9c4Q_fG_eMT3YAs-tSQlfsFMqRMXxr54XAfWiLgctw/exec"; // <-- replace with your web app URL
 const SHARED_TOKEN = "shopSecret2025";
 
 const KEY_QUEUE = "car_entry_queue_v1";
@@ -151,8 +151,13 @@ function clearForm(){
 // Named submit function used by the click handler
 async function submitForm() {
   // client validation: required fields
+  var carReg = document.getElementById('carRegistrationNo').value.trim();
+  var servicesChecked = document.querySelectorAll('.service:checked');
   var amount = document.getElementById('amountPaid').value.trim();
   var modeChecked = document.querySelectorAll('.mode:checked');
+
+  if (carReg === "") { alert("Car registration number is required."); return; }
+  if (!servicesChecked || servicesChecked.length === 0) { alert("Please select at least one service."); return; }
   if (amount === "") { alert("Amount paid by customer is required."); return; }
   if (!modeChecked || modeChecked.length === 0) { alert("Please select at least one mode of payment."); return; }
 
@@ -201,17 +206,4 @@ async function submitForm() {
   submitBtn.disabled = false; submitBtn.textContent = 'Submit';
 }
 
-// hook up the UI
-if (submitBtn) {
-  submitBtn.addEventListener('click', function(e){
-    e.preventDefault();
-    submitForm();
-  });
-}
-if (clearBtn) {
-  clearBtn.addEventListener('click', function(e){
-    e.preventDefault();
-    clearForm();
-    showMessage('Form cleared');
-  });
-}
+
