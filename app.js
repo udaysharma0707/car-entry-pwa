@@ -109,6 +109,7 @@ async function flushQueue() {
       console.error("flush error:", err);
       break;
     }
+    q = getQueue(); // refresh local copy
   }
   submitBtn.disabled = false;
 }
@@ -148,62 +149,78 @@ function clearForm(){
   if (document.getElementById('addIfMissing')) document.getElementById('addIfMissing').checked=false;
 }
 
-// Named submit function used by the click handler
-async function submitForm() {
-  // client validation: required fields
-  var carReg = document.getElementById('carRegistrationNo').value.trim();
-  var servicesChecked = document.querySelectorAll('.service:checked');
-  var amount = document.getElementById('amountPaid').value.trim();
-  var modeChecked = document.querySelectorAll('.mode:checked');
-
-  if (carReg === "") { alert("Car registration number is required."); return; }
-  if (!servicesChecked || servicesChecked.length === 0) { alert("Please select at least one service."); return; }
-  if (amount === "") { alert("Amount paid by customer is required."); return; }
-  if (!modeChecked || modeChecked.length === 0) { alert("Please select at least one mode of payment."); return; }
-
-  // collect and uppercase except services
-  var formData = collectFormData();
-  formData = uppercaseExceptServices(formData);
-
-  submitBtn.disabled = true; submitBtn.textContent = 'Saving...';
-
-  if (navigator.onLine) {
-    try {
-      // flush queued first
-      await flushQueue();
-
-      // send current item with clientTs (helps server keep order)
-      var clientTs = Date.now();
-      var resp = await sendToServerJSONP(formData, clientTs);
-
-      if (resp && resp.success) {
-        showMessage("Saved — Serial: " + resp.serial);
-        clearForm();
-        await flushQueue(); // attempt to flush anything left
-      } else if (resp && resp.error) {
-        // server-side validation error: show to user and DO NOT queue
-        alert("Server rejected: " + resp.error);
-      } else {
-        // unknown server condition: queue locally (but avoid queuing on validation errors above)
-        queueSubmission(formData);
-        clearForm();
-        showMessage("Saved locally (server busy). Will sync later.");
-      }
-    } catch (err) {
-      // network error -> queue locally
-      console.warn("Network / JSONP error:", err);
-      queueSubmission(formData);
-      clearForm();
-      showMessage("Network error — saved locally.");
-    }
-  } else {
-    // offline -> queue locally
-    queueSubmission(formData);
+// Wire Clear button
+if (clearBtn) {
+  clearBtn.addEventListener('click', function(){
     clearForm();
-    showMessage("Offline — saved locally and will sync when online.");
-  }
-
-  submitBtn.disabled = false; submitBtn.textContent = 'Submit';
+    showMessage('Form cleared');
+  });
 }
 
+// New submit behavior: immediate UI feedback + background sending/queueing
+submitBtn.addEventListener('click', function() {
+  try {
+    // client validation: required fields
+    var carReg = document.getElementById('carRegistrationNo').value.trim();
+    var servicesChecked = document.querySelectorAll('.service:checked');
+    var amount = document.getElementById('amountPaid').value.trim();
+    var modeChecked = document.querySelectorAll('.mode:checked');
 
+    if (carReg === "") { alert("Car registration number is required."); return; }
+    if (!servicesChecked || servicesChecked.length === 0) { alert("Please select at least one service."); return; }
+    if (amount === "") { alert("Amount paid by customer is required."); return; }
+    if (!modeChecked || modeChecked.length === 0) { alert("Please select at least one mode of payment."); return; }
+
+    // collect and uppercase except services
+    var formData = collectFormData();
+    formData = uppercaseExceptServices(formData);
+
+    // Immediate UX: inform user, clear form
+    showMessage('Submitted — registering...');
+    clearForm();
+
+    // briefly disable submit to avoid accidental very-quick duplicates, but keep button label unchanged
+    submitBtn.disabled = true;
+    setTimeout(()=>{ try { submitBtn.disabled = false; } catch(e){} }, 800);
+
+    // Fire-and-forget send plus background flush
+    (async function sendAndHandle() {
+      if (navigator.onLine) {
+        try {
+          // send current item with clientTs (helps server ordering)
+          const clientTs = Date.now();
+          const resp = await sendToServerJSONP(formData, clientTs).catch(e=>{ throw e; });
+
+          if (resp && resp.success) {
+            showMessage("Saved — Serial: " + resp.serial);
+          } else if (resp && resp.error) {
+            // server-side validation error: show to user (do NOT queue)
+            alert("Server rejected: " + resp.error);
+            showMessage("Submission rejected by server.");
+          } else {
+            // unknown server condition -> queue locally
+            queueSubmission(formData);
+            showMessage("Saved locally (server busy). Will sync later.");
+          }
+        } catch (err) {
+          // network/JSONP error -> queue locally
+          console.warn("Background send error:", err);
+          queueSubmission(formData);
+          showMessage("Network error — saved locally.");
+        }
+
+        // attempt to flush older queued items in background (don't await long)
+        flushQueue().catch(e=>{ console.warn("Background flush error:", e); });
+      } else {
+        // offline: queue locally
+        queueSubmission(formData);
+        showMessage("Offline — saved locally and will sync when online.");
+      }
+    })();
+
+  } catch (ex) {
+    console.error("submit handler error:", ex);
+    showMessage("Unexpected error. Try again.");
+    submitBtn.disabled = false;
+  }
+});
