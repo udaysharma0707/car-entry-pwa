@@ -1,6 +1,6 @@
 // app.js - improved mobile-friendly client with JSONP queue & background send
 // IMPORTANT: set ENDPOINT to your Apps Script web app URL and SHARED_TOKEN to the secret above
-const ENDPOINT = "https://script.google.com/macros/s/AKfycbw9CPa7Z-sYUhHWhbDC7rW8uAZi9c4Q_fG_eMT3YAs-tSQlfsFMqRMXxr54XAfWiLgctw/exec";
+const ENDPOINT = "https://script.google.com/macros/s/AKfycbwEyoxiwDyHNrdWT46zfJ9me5mBuO_F-B_WsQc04S64nOcIqKwhL9ae9qfXr_e3fGovKA/exec";
 const SHARED_TOKEN = "shopSecret2025";
 const KEY_QUEUE = "car_entry_queue_v1";
 
@@ -323,3 +323,4 @@ document.addEventListener('DOMContentLoaded', function() {
   }, 300);
 
 }); // DOMContentLoaded end
+
