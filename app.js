@@ -1,32 +1,65 @@
-// app.js - client with strong validation + JSONP queueing only on network errors
-const ENDPOINT = "https://script.google.com/macros/s/AKfycbw9CPa7Z-sYUhHWhbDC7rW8uAZi9c4Q_fG_eMT3YAs-tSQlfsFMqRMXxr54XAfWiLgctw/exec"; // <-- replace with your web app URL
+// app.js - improved mobile-friendly client with JSONP queue & background send
+// IMPORTANT: set ENDPOINT to your Apps Script web app URL and SHARED_TOKEN to the secret above
+const ENDPOINT = "https://script.google.com/macros/s/AKfycbw9CPa7Z-sYUhHWhbDC7rW8uAZi9c4Q_fG_eMT3YAs-tSQlfsFMqRMXxr54XAfWiLgctw/exec";
 const SHARED_TOKEN = "shopSecret2025";
-
 const KEY_QUEUE = "car_entry_queue_v1";
-const submitBtn = document.getElementById('submitBtn');
-const clearBtn = document.getElementById('clearBtn');
-const statusSpan = document.getElementById('status');
 
-function updateStatus(){ statusSpan.textContent = navigator.onLine ? 'online' : 'offline'; }
+// ---------- helpers ----------
+
+function updateStatus() {
+  const s = document.getElementById('status');
+  if (s) s.textContent = navigator.onLine ? 'online' : 'offline';
+  console.log('[STATUS]', navigator.onLine ? 'online' : 'offline');
+}
 window.addEventListener('online', ()=>{ updateStatus(); flushQueue(); });
 window.addEventListener('offline', ()=>{ updateStatus(); });
-updateStatus();
 
-function getQueue(){ try { return JSON.parse(localStorage.getItem(KEY_QUEUE) || "[]"); } catch(e){ return []; } }
+// queue helpers
+function getQueue(){ try { return JSON.parse(localStorage.getItem(KEY_QUEUE) || "[]"); } catch(e){ console.warn('queue parse err', e); return []; } }
 function setQueue(q){ localStorage.setItem(KEY_QUEUE, JSON.stringify(q)); }
 
-// uppercase helper (except services)
+// Uppercase except services (do not touch services array)
 function uppercaseExceptServices(fd) {
   try {
     fd.carRegistrationNo = (fd.carRegistrationNo || "").toString().toUpperCase();
     fd.carName = (fd.carName || "").toString().toUpperCase();
-    // services left as-is (array)
     if (Array.isArray(fd.modeOfPayment)) fd.modeOfPayment = fd.modeOfPayment.map(s => (s||"").toString().toUpperCase());
     else fd.modeOfPayment = (fd.modeOfPayment || "").toString().toUpperCase();
     fd.adviceToCustomer = (fd.adviceToCustomer || "").toString().toUpperCase();
     fd.otherInfo = (fd.otherInfo || "").toString().toUpperCase();
-  } catch(e){}
+  } catch(e){ console.warn('uppercaseExceptServices err', e); }
   return fd;
+}
+
+// Format car registration: try to produce "AA NNXXX NNNN" style (state + RTO+letters + last4)
+function formatCarRegistration(raw) {
+  if (!raw) return raw;
+  var s = raw.toString().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  // try main regex: 1-2 letters, 1-2 digits, 0-4 letters/digits, 4 digits
+  var re = /^([A-Z]{1,2})(\d{1,2})([A-Z0-9]{0,6})(\d{4})$/;
+  var m = s.match(re);
+  if (m) {
+    var part1 = m[1];
+    var part2 = m[2] + (m[3] || "");
+    var part3 = m[4];
+    return part1 + " " + part2 + " " + part3;
+  }
+  // fallback: if ends with 4 digits, split them and put space before last4, and space after first 1-2 letters if present
+  var last4 = s.match(/(\d{4})$/);
+  if (last4) {
+    var last4Digits = last4[1];
+    var rest = s.slice(0, s.length - 4);
+    if (rest.length >= 2) {
+      var st = rest.slice(0, 2);
+      var mid = rest.slice(2);
+      if (mid.length > 0) return st + " " + mid + " " + last4Digits;
+      return st + " " + last4Digits;
+    } else if (rest.length > 0) {
+      return rest + " " + last4Digits;
+    }
+  }
+  // otherwise return cleaned uppercased string
+  return s;
 }
 
 // JSONP helper
@@ -87,33 +120,38 @@ function sendToServerJSONP(formData, clientTs) {
 
 function queueSubmission(formData){
   var q = getQueue(); q.push({ ts: Date.now(), data: formData }); setQueue(q);
+  console.log('[QUEUE] queued, length=', getQueue().length);
 }
 
+// flushQueue: sequentially send oldest-first
 async function flushQueue() {
   if (!navigator.onLine) return;
   var q = getQueue();
-  if (!q || q.length === 0) return;
-  submitBtn.disabled = true;
+  if (!q || q.length === 0) { console.log('[FLUSH] queue empty'); return; }
+  console.log('[FLUSH] starting, len=', q.length);
+  var submitBtnEl = document.getElementById('submitBtn');
+  if (submitBtnEl) submitBtnEl.disabled = true;
   while (q.length > 0 && navigator.onLine) {
     var item = q[0];
     try {
       var resp = await sendToServerJSONP(item.data, item.ts);
+      console.log('[FLUSH] resp', resp);
       if (resp && resp.success) { q.shift(); setQueue(q); await new Promise(r=>setTimeout(r,120)); }
       else {
-        // If server returns error (validation), do NOT queue further - show and stop
-        if (resp && resp.error) { alert("Server error: " + resp.error); break; }
-        // else unknown server failure -> break (we'll try later)
+        if (resp && resp.error) { alert("Server error during flush: " + resp.error); break; }
         break;
       }
     } catch (err) {
-      console.error("flush error:", err);
+      console.warn('[FLUSH] error', err);
       break;
     }
-    q = getQueue(); // refresh local copy
+    q = getQueue();
   }
-  submitBtn.disabled = false;
+  if (submitBtnEl) submitBtnEl.disabled = false;
+  console.log('[FLUSH] finished, remaining=', getQueue().length);
 }
 
+// collect data from DOM
 function collectFormData(){
   var services = Array.from(document.querySelectorAll('.service:checked')).map(i=>i.value);
   var mode = Array.from(document.querySelectorAll('.mode:checked')).map(i=>i.value);
@@ -132,116 +170,156 @@ function collectFormData(){
 }
 
 function showMessage(text){
-  var m = document.getElementById('msg'); if (!m) { alert(text); return; }
+  var m = document.getElementById('msg');
+  if (!m) { console.log('[UI]', text); return; }
   m.textContent = text; m.style.display='block';
-  setTimeout(()=>{ m.style.display='none'; }, 4000);
+  setTimeout(()=>{ if (m) m.style.display='none'; }, 4000);
 }
 function clearForm(){
-  document.getElementById('carRegistrationNo').value='';
-  document.getElementById('carName').value='';
-  document.querySelectorAll('.service').forEach(ch=>ch.checked=false);
-  document.getElementById('qtyTiresWheelCoverSold').value='';
-  document.getElementById('amountPaid').value='';
-  document.querySelectorAll('.mode').forEach(ch=>ch.checked=false);
-  document.getElementById('kmsTravelled').value='';
-  document.getElementById('adviceToCustomer').value='';
-  document.getElementById('otherInfo').value='';
-  if (document.getElementById('addIfMissing')) document.getElementById('addIfMissing').checked=false;
-}
-
-// Wire Clear button
-if (clearBtn) {
-  clearBtn.addEventListener('click', function(){
-    clearForm();
-    showMessage('Form cleared');
-  });
-}
-
-// REPLACE your existing submitBtn.addEventListener('click', ...) with this:
-submitBtn.addEventListener('click', function () {
   try {
-    // client validation: required fields
-    var carReg = document.getElementById('carRegistrationNo').value.trim();
-    var servicesChecked = document.querySelectorAll('.service:checked');
-    var amount = document.getElementById('amountPaid').value.trim();
-    var modeChecked = document.querySelectorAll('.mode:checked');
+    document.getElementById('carRegistrationNo').value='';
+    document.getElementById('carName').value='';
+    document.querySelectorAll('.service').forEach(ch=>ch.checked=false);
+    document.getElementById('qtyTiresWheelCoverSold').value='';
+    document.getElementById('amountPaid').value='';
+    document.querySelectorAll('.mode').forEach(ch=>ch.checked=false);
+    document.getElementById('kmsTravelled').value='';
+    document.getElementById('adviceToCustomer').value='';
+    document.getElementById('otherInfo').value='';
+    if (document.getElementById('addIfMissing')) document.getElementById('addIfMissing').checked=false;
+  } catch(e){ console.warn('clearForm error', e); }
+}
 
-    if (carReg === "") { alert("Car registration number is required."); return; }
-    if (!servicesChecked || servicesChecked.length === 0) { alert("Please select at least one service."); return; }
-    if (amount === "") { alert("Amount paid by customer is required."); return; }
-    if (!modeChecked || modeChecked.length === 0) { alert("Please select at least one mode of payment."); return; }
+// ---------- DOM bindings (safe for mobile) ----------
+document.addEventListener('DOMContentLoaded', function() {
+  updateStatus();
 
-    // collect + uppercase (except services)
-    var formData = collectFormData();
-    formData = uppercaseExceptServices(formData);
+  const submitBtn = document.getElementById('submitBtn');
+  const clearBtn = document.getElementById('clearBtn');
 
-    // immediate UI feedback: brief "Saving..." then restore quickly so mobile won't stick
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Saving...';
-    // allow the browser a tick to repaint
-    setTimeout(function(){
-      // restore button quickly so it doesn't stay stuck
-      submitBtn.textContent = 'Submit';
-      submitBtn.disabled = false;
-    }, 700); // 700ms is enough for visible feedback but short enough not to annoy
-
-    // Clear UI immediately so user doesn't have to backspace
-    showMessage('Submitted — registering...');
-    clearForm();
-
-    // Run network work in background (fire-and-forget). It will still queue on failures.
-    (async function backgroundSend() {
-      try {
-        if (navigator.onLine) {
-          // flush any earlier queued items first
-          try { await flushQueue(); } catch (e) { console.warn('flushQueue failed', e); }
-
-          // send current item (include clientTs to preserve order)
-          try {
-            const clientTs = Date.now();
-            const resp = await sendToServerJSONP(formData, clientTs);
-            if (resp && resp.success) {
-              showMessage('Saved — Serial: ' + resp.serial);
-            } else if (resp && resp.error) {
-              // server validation or rejection (do not queue)
-              showMessage('Server rejected: ' + resp.error);
-              console.warn('Server rejected submission:', resp.error);
-            } else {
-              // unknown server issue -> queue locally
-              queueSubmission(formData);
-              showMessage('Saved locally (server busy). Will sync later.');
-            }
-          } catch (errSend) {
-            // network/JSONP error -> queue locally
-            console.warn('sendToServerJSONP failed, queuing locally', errSend);
-            queueSubmission(formData);
-            showMessage('Network error — saved locally.');
-          }
-
-          // attempt another flush (best-effort)
-          try { await flushQueue(); } catch (e) { /* ignore */ }
-        } else {
-          // offline -> queue locally
-          queueSubmission(formData);
-          showMessage('Offline — saved locally and will sync when online.');
-        }
-      } catch (err) {
-        console.error('backgroundSend unexpected error', err);
-        // ensure it's queued so nothing is lost
-        try { queueSubmission(formData); } catch(e){}
-        showMessage('Error occurred — saved locally.');
-      }
-    })();
-
-  } catch (ex) {
-    console.error('submit handler exception', ex);
-    showMessage('Unexpected error. Try again.');
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Submit';
+  if (!submitBtn) {
+    console.warn('[INIT] submitBtn not found in DOM');
+    return;
   }
-});
 
-});
+  // Ensure button is type=button
+  try { submitBtn.setAttribute('type','button'); } catch(e){}
 
+  // Prevent double-handling between touchend and click
+  let ignoreNextClick = false;
 
+  async function doSubmitFlow() {
+    try {
+      // Basic client validation
+      var carReg = document.getElementById('carRegistrationNo').value.trim();
+      var servicesChecked = document.querySelectorAll('.service:checked');
+      var amount = document.getElementById('amountPaid').value.trim();
+      var modeChecked = document.querySelectorAll('.mode:checked');
 
+      if (carReg === "") { alert("Car registration number is required."); return; }
+      if (!servicesChecked || servicesChecked.length === 0) { alert("Please select at least one service."); return; }
+      if (amount === "") { alert("Amount paid by customer is required."); return; }
+      if (!modeChecked || modeChecked.length === 0) { alert("Please select at least one mode of payment."); return; }
+
+      // collect
+      var formData = collectFormData();
+      // format car registration (client-side)
+      formData.carRegistrationNo = formatCarRegistration(formData.carRegistrationNo);
+      // uppercase except services
+      formData = uppercaseExceptServices(formData);
+
+      // immediate visible feedback but short-lived
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Saving...';
+      setTimeout(()=>{ submitBtn.textContent = 'Submit'; submitBtn.disabled = false; }, 700);
+
+      // clear UI immediately (user asked for this)
+      showMessage('Submitted — registering...');
+      clearForm();
+
+      // background send
+      (async function backgroundSend() {
+        try {
+          if (navigator.onLine) {
+            // flush queued first
+            try { await flushQueue(); } catch(e){ console.warn('flushQueue err', e); }
+            // send current
+            try {
+              const clientTs = Date.now();
+              const resp = await sendToServerJSONP(formData, clientTs);
+              if (resp && resp.success) {
+                showMessage('Saved — Serial: ' + resp.serial);
+              } else if (resp && resp.error) {
+                // server validation error -> show message but do NOT queue
+                showMessage('Server rejected: ' + resp.error);
+                console.warn('Server rejected:', resp.error);
+              } else {
+                // unknown -> queue
+                queueSubmission(formData);
+                showMessage('Saved locally (server busy). Will sync later.');
+              }
+            } catch (errSend) {
+              console.warn('send failed -> queueing', errSend);
+              queueSubmission(formData);
+              showMessage('Network error — saved locally.');
+            }
+            // try flush again
+            try { await flushQueue(); } catch(e){}
+          } else {
+            queueSubmission(formData);
+            showMessage('Offline — saved locally and will sync when online.');
+          }
+        } catch (bgErr) {
+          console.error('backgroundSend unexpected', bgErr);
+          try { queueSubmission(formData); } catch(e){}
+          showMessage('Error occurred — saved locally.');
+        }
+      })();
+
+    } catch (ex) {
+      console.error('submit handler exception', ex);
+      showMessage('Unexpected error. Try again.');
+      submitBtn.disabled = false; submitBtn.textContent = 'Submit';
+    }
+  }
+
+  // touchend handler to support mobile taps
+  function onTouchEndSubmit(ev) {
+    if (!ev) return;
+    ev.preventDefault && ev.preventDefault();
+    ev.stopPropagation && ev.stopPropagation();
+    ignoreNextClick = true;
+    setTimeout(()=>{ ignoreNextClick = false; }, 800);
+    doSubmitFlow();
+  }
+  function onClickSubmit(ev) {
+    if (ignoreNextClick) { ev && ev.preventDefault(); console.log('[APP] ignored click after touch'); return; }
+    doSubmitFlow();
+  }
+
+  // Attach event listeners (touch first, then click)
+  submitBtn.addEventListener('touchend', onTouchEndSubmit, { passive:false });
+  submitBtn.addEventListener('click', onClickSubmit, { passive:false });
+
+  // Clear button
+  if (clearBtn) {
+    clearBtn.addEventListener('touchend', function(ev){ ev && ev.preventDefault(); clearForm(); showMessage('Form cleared'); }, { passive:false });
+    clearBtn.addEventListener('click', function(ev){ clearForm(); showMessage('Form cleared'); }, { passive:false });
+  }
+
+  // quick overlay check (helpful when mobile layouts accidentally cover button)
+  setTimeout(function(){
+    try {
+      var rect = submitBtn.getBoundingClientRect();
+      var midX = rect.left + rect.width/2;
+      var midY = rect.top + rect.height/2;
+      var el = document.elementFromPoint(midX, midY);
+      if (el && el !== submitBtn && !submitBtn.contains(el)) {
+        console.warn('[APP] submit button may be overlapped by', el);
+      } else {
+        console.log('[APP] submit button reachable');
+      }
+    } catch(e){}
+  }, 300);
+
+}); // DOMContentLoaded end
