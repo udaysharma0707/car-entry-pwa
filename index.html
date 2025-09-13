@@ -28,7 +28,23 @@
       padding:14px;
       box-sizing:border-box;
       box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+      position: relative; /* <-- needed so sheet-link can be placed top-right inside container */
     }
+    /* Google Sheet link (top-right) */
+    .sheet-link {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: #2c7be5;
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-size: 13px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+    }
+    .sheet-link:active,
+    .sheet-link:focus { outline: none; box-shadow: 0 0 0 3px rgba(44,123,229,0.18); }
 
     h1{font-size:20px;margin:0 0 10px 0}
     .q-label{display:block;margin-top:10px;font-weight:600}
@@ -85,6 +101,10 @@
 </head>
 <body>
   <div class="container">
+    <!-- top-right link to Google Sheet -->
+    <a class="sheet-link"
+       href="https://docs.google.com/spreadsheets/d/1j4gDEig-8fDdehg8qTyacTycvG7hoFMway_ap1UhBuE/edit"
+       target="_blank" rel="noopener" aria-label="Open Google sheet">Google sheet</a>
     <h1>Car Entry</h1>
 
     <label class="q-label">1. Car registration no.</label>
@@ -173,3 +193,4 @@
   </script>
 </body>
 </html>
+
