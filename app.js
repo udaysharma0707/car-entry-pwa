@@ -4,8 +4,10 @@ const ENDPOINT = "https://script.google.com/macros/s/AKfycbyY9nQhDuoJjYqpqnjRTK7
 const SHARED_TOKEN = "shopSecret2025";
 const KEY_QUEUE = "car_entry_queue_v1";
 
-// ---------- helpers ----------
+// ---------- runtime state for dedupe ----------
+const activeSubmissions = new Set(); // submissionIds currently being processed
 
+// ---------- helpers ----------
 function updateStatus() {
   const s = document.getElementById('status');
   if (s) s.textContent = navigator.onLine ? 'online' : 'offline';
@@ -14,8 +16,26 @@ function updateStatus() {
 window.addEventListener('online', ()=>{ updateStatus(); flushQueue(); });
 window.addEventListener('offline', ()=>{ updateStatus(); });
 
-// queue helpers
-function getQueue(){ try { return JSON.parse(localStorage.getItem(KEY_QUEUE) || "[]"); } catch(e){ console.warn('queue parse err', e); return []; } }
+// queue helpers (backwards-compatible)
+function getQueue(){
+  try {
+    const raw = localStorage.getItem(KEY_QUEUE) || "[]";
+    const arr = JSON.parse(raw);
+    // Normalize any old-format items (data-only) to have id
+    return arr.map(item => {
+      if (!item) return null;
+      if (item.id) return item;
+      // older format: {ts:..., data:...} -> ensure id exists
+      if (item.data && item.data.submissionId) return { id: item.data.submissionId, ts: item.ts, data: item.data };
+      // fallback: create id
+      const gen = ("s_" + (item.ts || Date.now()) + "_" + Math.floor(Math.random()*1000000));
+      return { id: gen, ts: item.ts || Date.now(), data: item.data || {} };
+    }).filter(Boolean);
+  } catch(e){
+    console.warn('queue parse err', e);
+    return [];
+  }
+}
 function setQueue(q){ localStorage.setItem(KEY_QUEUE, JSON.stringify(q)); }
 
 // Uppercase except services (do not touch services array)
@@ -31,11 +51,10 @@ function uppercaseExceptServices(fd) {
   return fd;
 }
 
-// Format car registration: try to produce "AA NNXXX NNNN" style (state + RTO+letters + last4)
+// Format car registration: try to produce "AA NNXXX NNNN" style
 function formatCarRegistration(raw) {
   if (!raw) return raw;
   var s = raw.toString().toUpperCase().replace(/[^A-Z0-9]/g, "");
-  // try main regex: 1-2 letters, 1-2 digits, 0-4 letters/digits, 4 digits
   var re = /^([A-Z]{1,2})(\d{1,2})([A-Z0-9]{0,6})(\d{4})$/;
   var m = s.match(re);
   if (m) {
@@ -44,7 +63,6 @@ function formatCarRegistration(raw) {
     var part3 = m[4];
     return part1 + " " + part2 + " " + part3;
   }
-  // fallback: if ends with 4 digits, split them and put space before last4, and space after first 1-2 letters if present
   var last4 = s.match(/(\d{4})$/);
   if (last4) {
     var last4Digits = last4[1];
@@ -58,7 +76,6 @@ function formatCarRegistration(raw) {
       return rest + " " + last4Digits;
     }
   }
-  // otherwise return cleaned uppercased string
   return s;
 }
 
@@ -94,7 +111,7 @@ function jsonpRequest(url, timeoutMs) {
   });
 }
 
-// Build JSONP URL and call
+// Build JSONP URL and call — now includes submissionId
 function sendToServerJSONP(formData, clientTs) {
   var params = [];
   function add(k,v){ if (v === undefined || v === null) v=""; params.push(encodeURIComponent(k) + "=" + encodeURIComponent(String(v))); }
@@ -110,6 +127,8 @@ function sendToServerJSONP(formData, clientTs) {
   add("kmsTravelled", formData.kmsTravelled || "");
   add("adviceToCustomer", formData.adviceToCustomer || "");
   add("otherInfo", formData.otherInfo || "");
+  // include submissionId for server-side dedupe
+  if (formData.submissionId) add("submissionId", formData.submissionId);
   if (clientTs) add("clientTs", String(clientTs));
 
   var base = ENDPOINT;
@@ -118,12 +137,21 @@ function sendToServerJSONP(formData, clientTs) {
   return jsonpRequest(url, 20000);
 }
 
+// queue an item — avoid duplicates by submissionId
 function queueSubmission(formData){
-  var q = getQueue(); q.push({ ts: Date.now(), data: formData }); setQueue(q);
-  console.log('[QUEUE] queued, length=', getQueue().length);
+  var q = getQueue();
+  var id = formData.submissionId || ("s_" + Date.now() + "_" + Math.floor(Math.random()*1000000));
+  // if already present, don't add again
+  if (q.some(it => it && it.id === id)) {
+    console.log('[QUEUE] submission already queued, id=', id);
+    return;
+  }
+  q.push({ id: id, ts: Date.now(), data: formData });
+  setQueue(q);
+  console.log('[QUEUE] queued, length=', getQueue().length, 'id=', id);
 }
 
-// flushQueue: sequentially send oldest-first
+// flushQueue: sequentially send oldest-first (respects submissionId)
 async function flushQueue() {
   if (!navigator.onLine) return;
   var q = getQueue();
@@ -133,16 +161,36 @@ async function flushQueue() {
   if (submitBtnEl) submitBtnEl.disabled = true;
   while (q.length > 0 && navigator.onLine) {
     var item = q[0];
+    // guard: if item missing, shift
+    if (!item || !item.data) { q.shift(); setQueue(q); q = getQueue(); continue; }
+    // if this submission is currently active (in-flight elsewhere), skip it for now
+    if (item.id && activeSubmissions.has(item.id)) {
+      console.log('[FLUSH] skipping in-flight id=', item.id);
+      // move to next (we'll retry later)
+      break;
+    }
     try {
+      // mark active
+      if (item.id) activeSubmissions.add(item.id);
       var resp = await sendToServerJSONP(item.data, item.ts);
       console.log('[FLUSH] resp', resp);
-      if (resp && resp.success) { q.shift(); setQueue(q); await new Promise(r=>setTimeout(r,120)); }
-      else {
+      if (resp && resp.success) {
+        // remove from queue only on success
+        q.shift(); setQueue(q);
+        // remove from active
+        if (item.id) activeSubmissions.delete(item.id);
+        await new Promise(r=>setTimeout(r,120));
+      } else {
+        // server returned validation error => remove from queue? No — better to alert user and stop
         if (resp && resp.error) { alert("Server error during flush: " + resp.error); break; }
+        // unknown failure -> break and try later
+        if (item.id) activeSubmissions.delete(item.id);
         break;
       }
     } catch (err) {
       console.warn('[FLUSH] error', err);
+      // send failed -> ensure not marked active, and break to try later
+      if (item.id) activeSubmissions.delete(item.id);
       break;
     }
     q = getQueue();
@@ -190,6 +238,11 @@ function clearForm(){
   } catch(e){ console.warn('clearForm error', e); }
 }
 
+// small generator for submissionId
+function makeSubmissionId() {
+  return "s_" + Date.now() + "_" + Math.floor(Math.random()*1000000);
+}
+
 // ---------- DOM bindings (safe for mobile) ----------
 document.addEventListener('DOMContentLoaded', function() {
   updateStatus();
@@ -223,10 +276,24 @@ document.addEventListener('DOMContentLoaded', function() {
 
       // collect
       var formData = collectFormData();
+
+      // assign a submissionId (if not already present)
+      if (!formData.submissionId) formData.submissionId = makeSubmissionId();
+
+      // if this id is already active (somehow), stop
+      if (activeSubmissions.has(formData.submissionId)) {
+        console.log('[SUBMIT] submission already in-flight id=', formData.submissionId);
+        showMessage('Submission in progress — please wait');
+        return;
+      }
+
       // format car registration (client-side)
       formData.carRegistrationNo = formatCarRegistration(formData.carRegistrationNo);
       // uppercase except services
       formData = uppercaseExceptServices(formData);
+
+      // mark active so we don't double-send same id
+      activeSubmissions.add(formData.submissionId);
 
       // immediate visible feedback but short-lived
       submitBtn.disabled = true;
@@ -237,44 +304,58 @@ document.addEventListener('DOMContentLoaded', function() {
       showMessage('Submitted — registering...');
       clearForm();
 
-      // background send
-      (async function backgroundSend() {
+      // background send (fire-and-forget style)
+      (async function backgroundSend(localForm) {
         try {
           if (navigator.onLine) {
-            // flush queued first
+            // flush queued first (best-effort)
             try { await flushQueue(); } catch(e){ console.warn('flushQueue err', e); }
-            // send current
+
+            // Try send current item
             try {
               const clientTs = Date.now();
-              const resp = await sendToServerJSONP(formData, clientTs);
+              const resp = await sendToServerJSONP(localForm, clientTs);
               if (resp && resp.success) {
                 showMessage('Saved — Serial: ' + resp.serial);
+                // ensure item is not in queue (sometimes user retried earlier)
+                // remove any queued items with same id
+                try {
+                  let q = getQueue();
+                  q = q.filter(it => !(it && it.id === localForm.submissionId));
+                  setQueue(q);
+                } catch(e) { console.warn('cleanup queue err', e); }
               } else if (resp && resp.error) {
-                // server validation error -> show message but do NOT queue
+                // server validation error -> do NOT queue; inform user
                 showMessage('Server rejected: ' + resp.error);
                 console.warn('Server rejected:', resp.error);
               } else {
                 // unknown -> queue
-                queueSubmission(formData);
+                queueSubmission(localForm);
                 showMessage('Saved locally (server busy). Will sync later.');
               }
             } catch (errSend) {
+              // network/JSONP error -> queue locally
               console.warn('send failed -> queueing', errSend);
-              queueSubmission(formData);
+              queueSubmission(localForm);
               showMessage('Network error — saved locally.');
             }
-            // try flush again
+
+            // attempt another flush (best-effort)
             try { await flushQueue(); } catch(e){}
           } else {
-            queueSubmission(formData);
+            // offline -> queue locally
+            queueSubmission(localForm);
             showMessage('Offline — saved locally and will sync when online.');
           }
         } catch (bgErr) {
           console.error('backgroundSend unexpected', bgErr);
-          try { queueSubmission(formData); } catch(e){}
+          try { queueSubmission(localForm); } catch(e){}
           showMessage('Error occurred — saved locally.');
+        } finally {
+          // done processing this id
+          try { activeSubmissions.delete(localForm.submissionId); } catch(e){}
         }
-      })();
+      })(formData);
 
     } catch (ex) {
       console.error('submit handler exception', ex);
@@ -323,11 +404,3 @@ document.addEventListener('DOMContentLoaded', function() {
   }, 300);
 
 }); // DOMContentLoaded end
-
-
-
-
-
-
-
-
